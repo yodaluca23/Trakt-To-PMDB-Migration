@@ -22,7 +22,15 @@ pmdb_headers = {
 def add_user_information(token_data):
     global trakt_api_url, userAgent, trakt_headers
 
-    response = requests.get(trakt_api_url + "/users/settings", headers=trakt_headers)
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": userAgent,
+        "Authorization":  token_data.get("token_type") + " " + token_data.get("access_token"),
+        "trakt-api-version": "2",
+        "trakt-api-key": os.getenv("trakt_client")
+    }
+
+    response = requests.get(trakt_api_url + "/users/settings", headers=headers)
     if response.status_code == 200:
         user_info = response.json()
         print(f"User information retrieved: {user_info.get('user').get('username')}")
