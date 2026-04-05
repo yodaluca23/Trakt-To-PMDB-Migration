@@ -1,10 +1,10 @@
 # Trakt To Pmdb Migration Utility
 
-Sync your Trakt data into PMDB.
+Migrate your Trakt data into PMDB.
 
 This project connects to Trakt using the Device Code flow, stores your token locally, then pushes selected data to PMDB.
 
-## What it syncs
+## What it Migrates
 
 - Watchlist
 - Custom Trakt lists
@@ -17,8 +17,9 @@ The interactive entrypoint is `user.py`.
 
 Planned features and improvements:
 
-- A desktop GUI so syncing can be run without using the terminal.
-- A website interface for account connection and sync management.
+- Only migrate select lists.
+- A desktop GUI so migration can be run without using the terminal.
+- A website interface for account connection and migration management.
 - Packaged desktop builds:
 	- Windows `.exe`
 	- macOS `.dmg`
@@ -72,11 +73,11 @@ On later runs:
 - If `token.json` is still valid, it is reused.
 - If expired, it is refreshed automatically.
 
-## How sync works
+## How migration works
 
 When you run `user.py`, you can either:
 
-- Sync everything in one go, or
+- Migrate everything in one go, or
 - Choose each area individually:
 	- Watchlist
 	- Lists
@@ -87,14 +88,14 @@ When you run `user.py`, you can either:
 
 ## Other scripts
 
-- `main.py`: core API/auth/sync implementation.
+- `main.py`: core API/auth/migration implementation.
 - `debug.py`: utility that clears PMDB watch history entries.
 
 Use `debug.py` carefully because it deletes watch history records from PMDB.
 
 ## Notes and current behavior
 
-- PMDB list creation for custom Trakt lists currently creates new PMDB lists as part of sync.
+- PMDB list creation for custom Trakt lists currently creates new PMDB lists as part of migration.
 - Mapping from Trakt IDs to TMDB IDs is attempted when TMDB IDs are missing.
 - Console output is the primary logging mechanism.
 
@@ -103,7 +104,7 @@ Use `debug.py` carefully because it deletes watch history records from PMDB.
 - `401` or auth errors:
 	- Check `.env` values.
 	- Delete `token.json` and run again to re-authorize.
-- Items not syncing:
+- Items not migrating:
 	- Confirm those items exist in Trakt and are visible for the authenticated account.
 	- Check terminal output for PMDB API errors.
 - Dependency import errors:
