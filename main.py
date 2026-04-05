@@ -496,3 +496,91 @@ def sync_show_watch_history():
             print("Show watch history synced with some errors. Please check the logs for details.")
     else:
         print(f"Failed to fetch watched shows: {response.status_code} - {response.text}")
+
+def submit_resume_point_to_pmdb(item):
+    global pmdb_api_url, pmdb_headers
+
+    item_type = "movie" if item.get("type") == "movie" else "tv"
+    item_spesific = item.get("movie", item.get("show", {}))
+    ids = item_spesific.get("ids", {})
+
+    # Normalize progress percentage to runtime and position in milliseconds for PMDB, since it doesn't support percentage-based resume points.
+    percentage = item.get("progress", 0)
+    runtime_ms = 100 * 10000 # Full 100% complete
+    position_ms = percentage * 10000 # Normalized to account for decimal points
+    position_ms = round(position_ms) # Round to nearest millisecond
+
+    url = pmdb_api_url + "/external/resume"
+    body = {
+        "media_type": item_type,
+        "tmdb_id": ids.get("tmdb"),
+        "id_type": "trakt",
+        "id_value": ids.get("trakt"),
+        "position_ms": position_ms,
+        "runtime_ms": runtime_ms
+    }
+
+    if item_type == "tv":
+        body["season"] = item.get("episode", {}).get("season")
+        body["episode"] = item.get("episode", {}).get("number")
+
+    response = requests.post(url, headers=pmdb_headers, json=body)
+    if response.status_code >= 200 and response.status_code < 300 and response.json().get("action") == "saved":
+        return True
+    else:
+        print(f"Failed to submit resume point for {"Movie" if item_type == "movie" else "Show"} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}")
+        return False
+
+def sync_show_resume_points():
+    global trakt_api_url, token_data, userAgent, trakt_headers, pmdb_api_url, pmdb_headers
+    print("Syncing show resume points...")
+
+    url = trakt_api_url + "/sync/playback/episodes"
+    response = requests.get(url, headers=trakt_headers)
+
+    if response.status_code == 200:
+        progress_data = response.json()
+
+        all_success = True
+
+        for show in progress_data:
+            success = submit_resume_point_to_pmdb(show)
+            if not success:
+                all_success = False
+
+        if all_success:
+            print("Show resume points synced successfully!")
+        else:
+            print("Show resume points synced with some errors. Please check the logs for details.")
+    else:
+        print(f"Failed to fetch show resume points: {response.status_code} - {response.text}")
+        all_success = False
+
+    return all_success
+
+def sync_movie_resume_points():
+    global trakt_api_url, token_data, userAgent, trakt_headers, pmdb_api_url, pmdb_headers
+    print("Syncing movie resume points...")
+
+    url = trakt_api_url + "/sync/playback/movies"
+    response = requests.get(url, headers=trakt_headers)
+
+    if response.status_code == 200:
+        progress_data = response.json()
+
+        all_success = True
+
+        for movie in progress_data:
+            success = submit_resume_point_to_pmdb(movie)
+            if not success:
+                all_success = False
+
+        if all_success:
+            print("Movie resume points synced successfully!")
+        else:
+            print("Movie resume points synced with some errors. Please check the logs for details.")
+    else:
+        print(f"Failed to fetch movie resume points: {response.status_code} - {response.text}")
+        all_success = False
+
+    return all_success

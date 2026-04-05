@@ -8,8 +8,8 @@ This project connects to Trakt using the Device Code flow, stores your token loc
 
 - Watchlist
 - Custom Trakt lists
-- Movie watch history
-- Show watch history
+- Movie and Show watch history
+- Resume points (progress) for movies and shows
 
 The interactive entrypoint is `user.py`.
 
@@ -17,7 +17,6 @@ The interactive entrypoint is `user.py`.
 
 Planned features and improvements:
 
-- Resume point syncing (continue watching progress) as a first-class option in the interactive flow.
 - A desktop GUI so syncing can be run without using the terminal.
 - A website interface for account connection and sync management.
 - Packaged desktop builds:
@@ -79,10 +78,12 @@ When you run `user.py`, you can either:
 
 - Sync everything in one go, or
 - Choose each area individually:
+	- Watchlist
 	- Lists
 	- Show watch history
 	- Movie watch history
-	- Watchlist
+    - Show resume points
+    - Movie resume points
 
 ## Other scripts
 
