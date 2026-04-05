@@ -1,8 +1,8 @@
 # Trakt To Pmdb Migration Utility
 
-Migrate your Trakt data into PMDB.
+Migrate your Trakt data into The PublicMetaDb.
 
-This project connects to Trakt using the Device Code flow, stores your token locally, then pushes selected data to PMDB.
+This project connects to Trakt using the Device Code flow, stores your token locally, then pushes selected data to The PublicMetaDb.
 
 ## What it Migrates
 
@@ -89,13 +89,13 @@ When you run `user.py`, you can either:
 ## Other scripts
 
 - `main.py`: core API/auth/migration implementation.
-- `debug.py`: utility that clears PMDB watch history entries.
+- `debug.py`: utility that clears PublicMetaDb watch history entries.
 
-Use `debug.py` carefully because it deletes watch history records from PMDB.
+Use `debug.py` carefully because it deletes watch history records from The PublicMetaDb.
 
 ## Notes and current behavior
 
-- PMDB list creation for custom Trakt lists currently creates new PMDB lists as part of migration.
+- PublicMetaDb list creation for custom Trakt lists currently creates new PublicMetaDb lists as part of migration.
 - Mapping from Trakt IDs to TMDB IDs is attempted when TMDB IDs are missing.
 - Console output is the primary logging mechanism.
 
