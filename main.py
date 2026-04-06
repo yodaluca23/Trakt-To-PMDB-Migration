@@ -29,7 +29,7 @@ class SyncContext:
     def username(self):
         return self.token_data.get("user_info", {}).get("user", {}).get("username")
 
-def create_trakt_headers(token_data: dict = None):
+def create_trakt_headers(token_data: dict = None) -> dict:
     headers = {
         "trakt-api-version": "2",
         "trakt-api-key": os.getenv("trakt_client")
@@ -40,14 +40,14 @@ def create_trakt_headers(token_data: dict = None):
 
     return headers
 
-def build_sync_context(token_data: dict, pmdb_api_key: str):
+def build_sync_context(token_data: dict, pmdb_api_key: str) -> SyncContext:
     return SyncContext(
         token_data=token_data,
         trakt_headers=create_trakt_headers(token_data),
         pmdb_headers={"Authorization": "Bearer " + pmdb_api_key}
     )
 
-def add_user_information(token_data: dict, trakt_headers: dict):
+def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
 
     response = session.get(trakt_api_url + "/users/settings", headers=trakt_headers)
     if response.status_code == 200:
@@ -59,7 +59,7 @@ def add_user_information(token_data: dict, trakt_headers: dict):
         print(f"Failed to retrieve user information: {response.status_code} - {response.text}")
         return None
 
-def code_authorize_user():
+def code_authorize_user() -> dict | None:
     global trakt_api_url, userAgent
     print("Authorizing user...")
 
@@ -105,7 +105,7 @@ def code_authorize_user():
             print(f"Error: {response.status_code} - {response.text}")
             break
 
-def fetch_watchlist(ctx: SyncContext):
+def fetch_watchlist(ctx: SyncContext) -> list | None:
     print("Fetching watchlist...")
 
     url = trakt_api_url + f"/users/{ctx.username}/watchlist/all/added/asc"
@@ -117,7 +117,7 @@ def fetch_watchlist(ctx: SyncContext):
         print(f"Watchlist fetched successfully. Total items: {len(watchlist)}")
         return watchlist
 
-def get_pmdb_watchlist_id(ctx: SyncContext):
+def get_pmdb_watchlist_id(ctx: SyncContext) -> str | None:
     print("Retrieving PMDB watchlist ID...")
     url = pmdb_api_url + "/external/lists"
 
@@ -146,7 +146,7 @@ def get_pmdb_watchlist_id(ctx: SyncContext):
             print(f"Failed to create PMDB watchlist: {response.status_code} - {response.text}")
         return None
 
-def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict):
+def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict) -> bool:
 
     tmdb_id = item.get("movie", item.get("show", {})).get("ids", {}).get("tmdb")
 
@@ -175,7 +175,7 @@ def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict):
         print(f"Failed to add '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist: {response.status_code} - {response.text}")
     return False
 
-def sync_watchlist(ctx: SyncContext):
+def sync_watchlist(ctx: SyncContext) -> bool:
     print("Syncing watchlist...")
     watchlist = fetch_watchlist(ctx)
     pmdb_watchlist_id = get_pmdb_watchlist_id(ctx)
@@ -193,7 +193,7 @@ def sync_watchlist(ctx: SyncContext):
     else:
         print("Watchlist synced with some errors. Please check the logs for details.")
 
-def fetch_trakt_lists(ctx: SyncContext):
+def fetch_trakt_lists(ctx: SyncContext) -> list | None:
     print("Fetching Trakt lists...")
     url = trakt_api_url + f"/users/{ctx.username}/lists"
 
@@ -207,7 +207,7 @@ def fetch_trakt_lists(ctx: SyncContext):
         print(f"Failed to fetch Trakt lists: {response.status_code} - {response.text}")
         return []
 
-def fetch_trakt_list(ctx: SyncContext, trakt_list: dict):
+def fetch_trakt_list(ctx: SyncContext, trakt_list: dict) -> list | None:
     url = trakt_api_url + f"/users/{ctx.username}/lists/{trakt_list.get('ids').get('trakt')}/items/all/added/asc"
 
     response = session.get(url, headers=ctx.trakt_headers)
@@ -217,7 +217,7 @@ def fetch_trakt_list(ctx: SyncContext, trakt_list: dict):
         print(f"Failed to fetch Trakt list: {response.status_code} - {response.text}")
         return []
 
-def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list):
+def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list) -> bool:
     print(f"Adding list '{trakt_list.get('name')}' to PMDB...")
 
     url = pmdb_api_url + "/external/lists"
@@ -249,12 +249,14 @@ def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list)
         print(f"Failed to create PMDB list '{trakt_list.get('name')}': {response.status_code} - {response.text}")
         return False
 
-def sync_lists(ctx: SyncContext, sync_all: bool = True):
+def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
     trakt_lists = fetch_trakt_lists(ctx)
 
     #sync_all = input("Do you want to sync all lists? (y/n): ").lower().replace(" ", "") == "y"
     if sync_all:
         print("Syncing all lists...")
+
+    all_success = True
 
     for trakt_list in trakt_lists:
         if not sync_all:
@@ -272,9 +274,12 @@ def sync_lists(ctx: SyncContext, sync_all: bool = True):
         if success:
             print(f"List '{trakt_list.get('name')}' synced successfully!")
         else:
+            all_success = False
             print(f"Failed to sync list '{trakt_list.get('name')}'. Please check the logs for details.")
 
-def submit_watched_timestamp_to_pmdb(ctx: SyncContext, tmdb_id: int, type: str, watched_at: str, season: int = None, episode: int = None):
+    return all_success
+
+def submit_watched_timestamp_to_pmdb(ctx: SyncContext, tmdb_id: int, type: str, watched_at: str, season: int = None, episode: int = None) -> bool:
         url = pmdb_api_url + "/external/watched"
 
         if watched_at == "1970-01-01T00:00:00.000Z":
@@ -297,7 +302,7 @@ def submit_watched_timestamp_to_pmdb(ctx: SyncContext, tmdb_id: int, type: str, 
             print(f"Failed to submit watch history for TMDB ID {tmdb_id} to PMDB: {response.status_code} - {response.text}")
             return False
     
-def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict):
+def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
 
     tmdb_id = movie.get("movie", {}).get("ids", {}).get("tmdb")
 
@@ -330,7 +335,7 @@ def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict):
     else:
         return submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "movie", movie.get("last_watched_at", "1970-01-01T00:00:00.000Z"))
 
-def sync_movie_watch_history(ctx: SyncContext):
+def sync_movie_watch_history(ctx: SyncContext) -> bool:
 
     print("Syncing movie watch history...")
 
@@ -362,8 +367,7 @@ def sync_movie_watch_history(ctx: SyncContext):
         print(f"Failed to fetch watched movies: {response.status_code} - {response.text}")
         return False
     
-def add_show_watch_history(ctx: SyncContext, show: dict):
-
+def add_show_watch_history(ctx: SyncContext, show: dict) -> dict:
     for season in show.get("seasons", []):
 
         season_details = None
@@ -391,8 +395,7 @@ def add_show_watch_history(ctx: SyncContext, show: dict):
 
     return show
 
-def submit_history_show_to_pmdb(ctx: SyncContext, show: dict):
-
+def submit_history_show_to_pmdb(ctx: SyncContext, show: dict) -> bool:
     tmdb_id = show.get("show", {}).get("ids", {}).get("tmdb")
 
     if not tmdb_id:
@@ -430,7 +433,7 @@ def submit_history_show_to_pmdb(ctx: SyncContext, show: dict):
 
     return all_success
 
-def sync_show_watch_history(ctx: SyncContext):
+def sync_show_watch_history(ctx: SyncContext) -> bool:
     print("Syncing show watch history...")
 
     url = trakt_api_url + f"/users/{ctx.username}/watched/shows"
@@ -451,10 +454,13 @@ def sync_show_watch_history(ctx: SyncContext):
             print("Show watch history synced successfully!")
         else:
             print("Show watch history synced with some errors. Please check the logs for details.")
+
+        return all_success
     else:
         print(f"Failed to fetch watched shows: {response.status_code} - {response.text}")
-
-def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict):
+        return False
+    
+def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
 
     item_type = "movie" if item.get("type") == "movie" else "tv"
     item_spesific = item.get("movie", item.get("show", {}))
@@ -488,7 +494,7 @@ def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict):
         print(f"Failed to submit resume point for {media_label} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}")
         return False
 
-def sync_show_resume_points(ctx: SyncContext):
+def sync_show_resume_points(ctx: SyncContext) -> bool:
     print("Syncing show resume points...")
 
     url = trakt_api_url + "/sync/playback/episodes"
@@ -508,13 +514,13 @@ def sync_show_resume_points(ctx: SyncContext):
             print("Show resume points synced successfully!")
         else:
             print("Show resume points synced with some errors. Please check the logs for details.")
+        
+        return all_success
     else:
         print(f"Failed to fetch show resume points: {response.status_code} - {response.text}")
-        all_success = False
+        return False
 
-    return all_success
-
-def sync_movie_resume_points(ctx: SyncContext):
+def sync_movie_resume_points(ctx: SyncContext) -> bool:
     print("Syncing movie resume points...")
 
     url = trakt_api_url + "/sync/playback/movies"
@@ -534,8 +540,8 @@ def sync_movie_resume_points(ctx: SyncContext):
             print("Movie resume points synced successfully!")
         else:
             print("Movie resume points synced with some errors. Please check the logs for details.")
+
+        return all_success
     else:
         print(f"Failed to fetch movie resume points: {response.status_code} - {response.text}")
-        all_success = False
-
-    return all_success
+        return False

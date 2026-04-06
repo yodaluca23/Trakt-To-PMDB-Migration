@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 from main import code_authorize_user, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
 
-def check_for_existing_token():
+def check_for_existing_token() -> dict | None:
     global trakt_api_url
 
     if os.path.exists("token.json"):
@@ -41,7 +41,7 @@ def check_for_existing_token():
         print("No existing token found. Please authorize the user.")
         return None
 
-def clean_bool_input(prompt):
+def clean_bool_input(prompt: str) -> bool:
     return input(prompt).lower().replace(" ", "") == "y"
 
 if __name__ == "__main__":
