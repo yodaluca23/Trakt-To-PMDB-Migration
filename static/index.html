@@ -1,12 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trakt Migration</title>
+    <link rel="stylesheet" href="/main.css">
 </head>
+
 <body>
     <h1>Trakt Migration</h1>
+    <p class="sf-indicator">
+        <span class="trakt-status status-dot status-red"></span>
+        <span class="status-text">Trakt</span>
+    </p>
+
+    <p class="sf-indicator">
+        <span class="pmdb-status status-dot status-red"></span>
+        <span class="status-text">PublicMetaDb</span>
+    </p>
+    <script>
+        // Check if the user is authenticated
+        fetch("/auth/status")
+            .then(response => response.json())
+            .then(data => {
+                const pmdbStatusDot = document.querySelector(".pmdb-status");
+                const pmdbStatusText = document.querySelector(".pmdb-status + .status-text");
+                const traktStatusDot = document.querySelector(".trakt-status");
+                const traktStatusText = document.querySelector(".trakt-status + .status-text");
+
+                if (data.pmdb) {
+                    pmdbStatusDot.classList.remove("status-red");
+                    pmdbStatusDot.classList.add("status-green");
+                    pmdbStatusText.innerText = "PublicMetaDb (Logged In)";
+                } else {
+                    pmdbStatusDot.classList.remove("status-green");
+                    pmdbStatusDot.classList.add("status-red");
+                    pmdbStatusText.innerText = "PublicMetaDb (Not Logged In)";
+                }
+
+                if (data.trakt) {
+                    traktStatusDot.classList.remove("status-red");
+                    traktStatusDot.classList.add("status-green");
+                    traktStatusText.innerText = "Trakt (Logged In)";
+                } else {
+                    traktStatusDot.classList.remove("status-green");
+                    traktStatusDot.classList.add("status-red");
+                    traktStatusText.innerText = "Trakt (Not Logged In)";
+                }
+            })
+            .catch(error => {
+                console.error("Error checking PMDB authentication status:", error);
+            });
+    </script>
     <p>Welcome to the Trakt migration page!</p>
 </body>
+
 </html>

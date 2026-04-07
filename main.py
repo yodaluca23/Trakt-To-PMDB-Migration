@@ -58,6 +58,16 @@ def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
     else:
         print(f"Failed to retrieve user information: {response.status_code} - {response.text}")
         return None
+    
+def check_pmdb_token(token: str) -> bool:
+    global pmdb_api_url
+    url = pmdb_api_url + "/api/external/skips"
+    body = {
+        "media_type": "movie",
+        "tmdb_id": 83533
+    }
+    response = session.get(url, headers={"Authorization": "Bearer " + token})
+    return response.status_code == 200
 
 def code_authorize_user() -> dict | None:
     global trakt_api_url, userAgent

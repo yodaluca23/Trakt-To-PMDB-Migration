@@ -1,0 +1,58 @@
+/* --------------------------------------------------- */
+/*  Snippflow Status Indicators with Pulsing Animation */
+/* --------------------------------------------------- */
+
+.sf-indicator {
+  --sf-indicator-size: 8px;
+  --sf-indicator-green: #0bbf0b;
+  --sf-indicator-red: #c51b1b;
+  --sf-indicator-orange: #db8719;
+}
+
+.sf-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.sf-indicator .status-dot {
+  width: var(--sf-indicator-size);
+  height: var(--sf-indicator-size);
+  border-radius: 50%;
+  position: relative;
+}
+
+.sf-indicator .status-dot::before,
+.sf-indicator .status-dot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  background: inherit;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: sf-indicator-pulse 2s infinite linear;
+  opacity: 0.3;
+}
+
+.sf-indicator .status-dot::after {
+  animation-delay: 1s;
+}
+
+@keyframes sf-indicator-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.5);
+    opacity: 0;
+  }
+}
+
+.status-green { background-color: var(--sf-indicator-green); }
+.status-red { background-color: var(--sf-indicator-red); }
+.status-orange { background-color: var(--sf-indicator-orange); }

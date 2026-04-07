@@ -4,7 +4,7 @@ from webbrowser import open_new_tab
 import requests
 from datetime import datetime
 from time import sleep
-from main import sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
+from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,9 @@ app = FastAPI()
 session = requests.Session()
 
 def set_trakt_cookies(response: Response, data: dict) -> Response:
+
+    data = add_user_information(data, create_trakt_headers(data))
+
     refresh_token_data = {
         "refresh_token": data.get("refresh_token", ""),
         "created_at": data.get("created_at", 0),
@@ -26,10 +29,35 @@ def set_trakt_cookies(response: Response, data: dict) -> Response:
 
     cookies = base64.b64encode(json.dumps(data).encode()).decode()
     refresh_token = base64.b64encode(json.dumps(refresh_token_data).encode()).decode()
-    response.set_cookie(key="trakt-auth", value=cookies, httponly=True, max_age=data.get("expires_in", 3600), samesite="strict")
-    response.set_cookie(key="trakt-auth-refresh", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="strict")  # Set refresh token cookie for 30 days
+    response.set_cookie(key="trakt_auth", value=cookies, httponly=True, max_age=data.get("expires_in", 3600), samesite="strict")
+    response.set_cookie(key="trakt_auth_refresh", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="strict")  # Set refresh token cookie for 30 days
 
     return response
+
+async def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool]:
+    global trakt_api_url
+
+    client_id = os.getenv("trakt_client")
+    client_secret = os.getenv("trakt_secret")
+
+    url = trakt_api_url + "/oauth/token"
+
+    payload = {
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "refresh_token"
+    }
+    headers = {"Content-Type": "application/json"}
+
+    res = session.request("POST", url, json=payload, headers=headers)
+
+    if res.status_code == 200:
+        data = res.json()
+        response = set_trakt_cookies(response, data)
+        return response, True
+    else:
+        return response, False
 
 @app.get("/trakt/auth")
 async def generate_trakt_authorization_url() -> dict:
@@ -49,11 +77,11 @@ async def authenticate_trakt_user(response: Response, Authorization: str = Heade
     client_id = os.getenv("trakt_client")
     client_secret = os.getenv("trakt_secret")
     if not Authorization:
-        raise HTTPException(status_code=400, detail="Missing Authorization header")
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     code = Authorization.split(" ")[-1]  # Extract the code from the header
     if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code")
+        raise HTTPException(status_code=401, detail="Missing authorization code")
 
     url = trakt_api_url + "/oauth/token"
 
@@ -75,6 +103,61 @@ async def authenticate_trakt_user(response: Response, Authorization: str = Heade
         return {"success": True, "message": "Cookies set successfully"}
     else:
         raise HTTPException(status_code=res.status_code, detail={"error": "Failed to authenticate with Trakt", "details": res.text})
+    
+@app.post("/pmdb/auth")
+async def authenticate_pmdb_user(response: Response, Authorization: str = Header(default=None)) -> dict:
+    if not Authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    pmdb_auth = {
+        "api_key": Authorization
+    }
+    cookie = base64.b64encode(json.dumps(pmdb_auth).encode()).decode()
+
+    response.set_cookie(key="pmdb_auth", value=cookie, httponly=True, max_age=30*24*3600, samesite="strict")  # Set PMDB auth cookie for 30 days
+    return {"success": True, "message": "PMDB authentication successful"}
+
+@app.get("/auth/status")
+async def get_authentication_status(pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+
+    if (not trakt_auth) and trakt_auth_refresh:
+        trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
+
+    trakt_logged_in = trakt_auth is not None
+    pmdb_logged_in = pmdb_auth is not None
+
+    # Decode the auth cookies from base64
+    if trakt_auth:
+        try:
+            decoded_trakt_auth = base64.b64decode(trakt_auth).decode()
+            trakt_auth = json.loads(decoded_trakt_auth)
+        except Exception as e:
+            print(f"Error decoding trakt_auth cookie: {e}")
+            trakt_logged_in = False
+    
+    if pmdb_auth:
+        try:
+            decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
+            pmdb_auth = json.loads(decoded_pmdb_auth)
+            pmdb_auth = pmdb_auth.get("api_key", "")
+        except Exception as e:
+            print(f"Error decoding pmdb_auth cookie: {e}")
+            pmdb_logged_in = False
+
+    if trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
+        response, refreshed = await refresh_trakt_token(response, trakt_auth_refresh)
+        if refreshed:
+            trakt_logged_in = True
+        else:
+            trakt_logged_in = False
+
+    if pmdb_logged_in:
+        pmdb_logged_in = check_pmdb_token(pmdb_auth)
+
+    return {
+        "trakt": trakt_logged_in,
+        "pmdb": pmdb_logged_in
+    }
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
 # `html=True` makes `/` resolve to `static/index.html` automatically.
