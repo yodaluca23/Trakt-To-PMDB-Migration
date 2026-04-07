@@ -32,7 +32,7 @@
                 if (data.pmdb) {
                     pmdbStatusDot.classList.remove("status-red");
                     pmdbStatusDot.classList.add("status-green");
-                    pmdbStatusText.innerText = "PublicMetaDb (Logged In)";
+                    pmdbStatusText.innerText = `PublicMetaDb (${data.pmdb_user})`;
                 } else {
                     pmdbStatusDot.classList.remove("status-green");
                     pmdbStatusDot.classList.add("status-red");
@@ -42,7 +42,7 @@
                 if (data.trakt) {
                     traktStatusDot.classList.remove("status-red");
                     traktStatusDot.classList.add("status-green");
-                    traktStatusText.innerText = "Trakt (Logged In)";
+                    traktStatusText.innerText = `Trakt (${data.trakt_user})`;
                 } else {
                     traktStatusDot.classList.remove("status-green");
                     traktStatusDot.classList.add("status-red");
@@ -52,6 +52,47 @@
             .catch(error => {
                 console.error("Error checking PMDB authentication status:", error);
             });
+
+        // Add click behavior to Trakt status text
+        const traktStatusTextLink = document.querySelector(".trakt-status + .status-text");
+        if (traktStatusTextLink) {
+            traktStatusTextLink.addEventListener("click", () => {
+                fetch("/trakt/auth")
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.url) {
+                            window.location.href = data.url; // Redirect to the authentication URL
+                        } else {
+                            alert("Failed to get authentication URL. Please try again.");
+                        }
+                    });
+            });
+        }
+
+        // Add click behavior to PMDB status text
+        const pmdbStatusTextLink = document.querySelector(".pmdb-status + .status-text");
+        if (pmdbStatusTextLink) {
+            pmdbStatusTextLink.addEventListener("click", () => {
+                const apiKey = prompt("Please enter your PublicMetaDb API key:");
+                if (apiKey) {
+                    fetch("/pmdb/auth", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${apiKey}`
+                        },
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload(); // Reload the page to update the status
+                        } else {
+                            alert("Failed to save API key. Please try again.");
+                        }
+                    });
+                }
+            });
+        }
     </script>
     <p>Welcome to the Trakt migration page!</p>
 </body>

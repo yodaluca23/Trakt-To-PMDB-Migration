@@ -57,6 +57,9 @@ async def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[R
         response = set_trakt_cookies(response, data)
         return response, True
     else:
+        response.delete_cookie(key="trakt_auth")
+        response.delete_cookie(key="trakt_auth_refresh")
+
         return response, False
 
 @app.get("/trakt/auth")
@@ -108,9 +111,17 @@ async def authenticate_trakt_user(response: Response, Authorization: str = Heade
 async def authenticate_pmdb_user(response: Response, Authorization: str = Header(default=None)) -> dict:
     if not Authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
+    
+    api_key = Authorization.split(" ")[-1]  # Extract the API key from the header
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Missing API key")
+    
+    success = check_pmdb_token(api_key)
+    if not success:
+        raise HTTPException(status_code=401, detail="Invalid PMDB API key")
 
     pmdb_auth = {
-        "api_key": Authorization
+        "api_key": api_key
     }
     cookie = base64.b64encode(json.dumps(pmdb_auth).encode()).decode()
 
@@ -118,7 +129,7 @@ async def authenticate_pmdb_user(response: Response, Authorization: str = Header
     return {"success": True, "message": "PMDB authentication successful"}
 
 @app.get("/auth/status")
-async def get_authentication_status(pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+async def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
 
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
@@ -154,9 +165,22 @@ async def get_authentication_status(pmdb_auth: str | None = Cookie(default=None)
     if pmdb_logged_in:
         pmdb_logged_in = check_pmdb_token(pmdb_auth)
 
+    trakt_user = None
+    pmdb_user = None
+
+    if trakt_logged_in and trakt_auth:
+        trakt_user = trakt_auth.get("user_info", {}).get("user", {}).get("username")
+
+    if pmdb_logged_in and pmdb_auth:
+        pmdb_user = pmdb_auth[:15] + "..."  # Show only the first 15 characters of the PMDB API key for privacy
+    else:
+        response.delete_cookie(key="pmdb_auth")
+
     return {
         "trakt": trakt_logged_in,
-        "pmdb": pmdb_logged_in
+        "trakt_user": trakt_user,
+        "pmdb": pmdb_logged_in,
+        "pmdb_user": pmdb_user
     }
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.

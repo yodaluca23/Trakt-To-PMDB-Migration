@@ -61,12 +61,13 @@ def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
     
 def check_pmdb_token(token: str) -> bool:
     global pmdb_api_url
-    url = pmdb_api_url + "/api/external/skips"
-    body = {
-        "media_type": "movie",
-        "tmdb_id": 83533
-    }
-    response = session.get(url, headers={"Authorization": "Bearer " + token})
+
+    url = pmdb_api_url + "/external/ratings"
+    querystring = {"tmdb_id":"550","media_type":"movie"}
+    headers = {"Authorization": "Bearer " + token}
+
+    response = requests.request("GET", url, headers=headers, params=querystring)
+
     return response.status_code == 200
 
 def code_authorize_user() -> dict | None:
