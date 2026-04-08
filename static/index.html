@@ -29,6 +29,7 @@
         }
     </script>
 
+    <form id="sync-form">
     <input type="checkbox" onClick="toggle(this)" /> Toggle All<br><br>
 
     <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true">
@@ -43,13 +44,46 @@
     <label for="sync_show_resume_points_choice"> Sync show progress/resume points</label><br>
     <input type="checkbox" id="sync_movie_resume_points_choice" name="sync_options" value="true">
     <label for="sync_movie_resume_points_choice"> Sync movie progress/resume points</label><br><br>
-    <input type="submit" value="Submit">
+    <input type="button" id="sync-submit" value="Submit">
     </form>
 
     <script language="JavaScript">
 
+        const syncForm = document.getElementById("sync-form");
+        const syncSubmitButton = document.getElementById("sync-submit");
+
+        // Explicitly block native form submit so checked boxes are never appended to the URL.
+        syncForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+        });
+
+        syncSubmitButton.addEventListener("click", () => {
+
+            // Build an object where each checkbox id maps to its checked state.
+            const syncOptions = Array.from(document.querySelectorAll("input[name='sync_options']"))
+                .reduce((options, checkbox) => {
+                    options[checkbox.id] = checkbox.checked;
+                    return options;
+                }, {});
+            fetch("/migrate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(syncOptions)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert("Sync started successfully!");
+                } else {
+                    alert("Failed to start sync. Please try again.");
+                }
+            });
+        });
+
         function mark_form_as_hidden() {
-            form = document.querySelector("form");
+            const form = document.querySelector("form");
             if (form) {
                 form.style.display = "none";
             }

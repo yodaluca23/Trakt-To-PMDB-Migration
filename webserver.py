@@ -10,12 +10,36 @@ from fastapi import FastAPI, Header, HTTPException, Cookie, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import base64
+from pydantic import BaseModel
 
 load_dotenv()
 
 app = FastAPI()
 
 session = requests.Session()
+
+class sync_options(BaseModel):
+    sync_lists_choice: bool = False
+    sync_movie_resume_points_choice: bool = False
+    sync_movie_watch_history_choice: bool = False
+    sync_show_resume_points_choice: bool = False
+    sync_show_watch_history_choice: bool = False
+    sync_watchlist_choice: bool = False
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "sync_lists_choice": True,
+                    "sync_movie_resume_points_choice": True,
+                    "sync_movie_watch_history_choice": False,
+                    "sync_show_resume_points_choice": True,
+                    "sync_show_watch_history_choice": True,
+                    "sync_watchlist_choice": False
+                }
+            ]
+        }
+    }
 
 def set_trakt_cookies(response: Response, data: dict) -> Response:
 
@@ -34,7 +58,7 @@ def set_trakt_cookies(response: Response, data: dict) -> Response:
 
     return response
 
-async def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool]:
+def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool]:
     global trakt_api_url
 
     client_id = os.getenv("trakt_client")
@@ -63,18 +87,18 @@ async def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[R
         return response, False
 
 @app.get("/trakt/auth")
-async def generate_trakt_authorization_url() -> dict:
+def generate_trakt_authorization_url() -> dict:
     global trakt_api_url, userAgent
 
     client_id = os.getenv("trakt_client")
-    redirect_uri = "http://127.0.0.1:8000" + os.getenv("trakt_redirect_uri", "/trakt/callback")
+    redirect_uri = os.getenv("domain", "http://127.0.0.1:8000") + os.getenv("trakt_redirect_uri", "/trakt/callback")
     
     user_url = f"{trakt_api_url}/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}"
 
     return {"url": user_url}
 
 @app.post("/trakt/auth")
-async def authenticate_trakt_user(response: Response, Authorization: str = Header(default=None)) -> dict:
+def authenticate_trakt_user(response: Response, Authorization: str = Header(default=None)) -> dict:
     global trakt_api_url, userAgent
 
     client_id = os.getenv("trakt_client")
@@ -92,7 +116,7 @@ async def authenticate_trakt_user(response: Response, Authorization: str = Heade
         "code": code,
         "client_id": client_id,
         "client_secret": client_secret,
-        "redirect_uri": "http://127.0.0.1:8000" + os.getenv("trakt_redirect_uri", "/trakt/callback"),
+        "redirect_uri": os.getenv("domain", "http://127.0.0.1:8000") + os.getenv("trakt_redirect_uri", "/trakt/callback"),
         "grant_type": "authorization_code"
     }
     headers = {"Content-Type": "application/json"}
@@ -108,7 +132,7 @@ async def authenticate_trakt_user(response: Response, Authorization: str = Heade
         raise HTTPException(status_code=res.status_code, detail={"error": "Failed to authenticate with Trakt", "details": res.text})
     
 @app.post("/pmdb/auth")
-async def authenticate_pmdb_user(response: Response, Authorization: str = Header(default=None)) -> dict:
+def authenticate_pmdb_user(response: Response, Authorization: str = Header(default=None)) -> dict:
     if not Authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     
@@ -129,7 +153,7 @@ async def authenticate_pmdb_user(response: Response, Authorization: str = Header
     return {"success": True, "message": "PMDB authentication successful"}
 
 @app.get("/auth/status")
-async def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
 
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
@@ -156,7 +180,7 @@ async def get_authentication_status(response: Response, pmdb_auth: str | None = 
             pmdb_logged_in = False
 
     if trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
-        response, refreshed = await refresh_trakt_token(response, trakt_auth_refresh)
+        response, refreshed = refresh_trakt_token(response, trakt_auth_refresh)
         if refreshed:
             trakt_logged_in = True
         else:
@@ -182,6 +206,61 @@ async def get_authentication_status(response: Response, pmdb_auth: str | None = 
         "pmdb": pmdb_logged_in,
         "pmdb_user": pmdb_user
     }
+
+@app.post("/migrates")
+def migrate_data(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+    if (not trakt_auth) and trakt_auth_refresh:
+        trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
+
+    if not trakt_auth:
+        raise HTTPException(status_code=401, detail="Not authenticated with Trakt")
+    if not pmdb_auth:
+        raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
+
+    # Decode the auth cookies from base64
+    try:
+        decoded_trakt_auth = base64.b64decode(trakt_auth).decode()
+        trakt_auth = json.loads(decoded_trakt_auth)
+    except Exception as e:
+        print(f"Error decoding trakt_auth cookie: {e}")
+        raise HTTPException(status_code=400, detail="Invalid Trakt authentication cookie")
+    
+    try:
+        decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
+        pmdb_auth = json.loads(decoded_pmdb_auth)
+        pmdb_api_key = pmdb_auth.get("api_key", "")
+    except Exception as e:
+        print(f"Error decoding pmdb_auth cookie: {e}")
+        raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
+    
+    if (trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp():  # If token expires in less than 5 minutes
+        response, refreshed = refresh_trakt_token(response, trakt_auth_refresh)
+        if refreshed:
+            decoded_trakt_auth = base64.b64decode(response.cookies.get("trakt_auth")).decode()
+            trakt_auth = json.loads(decoded_trakt_auth)
+        else:
+            raise HTTPException(status_code=401, detail="Trakt authentication expired and refresh failed")
+
+    sync_context = build_sync_context(trakt_auth, pmdb_api_key)
+
+    results = {}
+
+    if sync_options.get("sync_watchlist"):
+        results["watchlist"] = sync_watchlist(sync_context)
+    
+    if sync_options.get("sync_movie_resume_points"):
+        results["movie_resume_points"] = sync_movie_resume_points(sync_context)
+
+    if sync_options.get("sync_movie_watch_history"):
+        results["movie_watch_history"] = sync_movie_watch_history(sync_context)
+
+    if sync_options.get("sync_show_resume_points"):
+        results["show_resume_points"] = sync_show_resume_points(sync_context)
+
+    if sync_options.get("sync_show_watch_history"):
+        results["show_watch_history"] = sync_show_watch_history(sync_context)
+
+    return {"success": True, "results": results}
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
 # `html=True` makes `/` resolve to `static/index.html` automatically.
