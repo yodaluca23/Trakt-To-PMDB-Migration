@@ -19,7 +19,42 @@
         <span class="pmdb-status status-dot status-red"></span>
         <span class="status-text">PublicMetaDb</span>
     </p>
-    <script>
+    <p>Welcome to the Trakt to PublicMetaDb migration website!</p>
+
+    <script language="JavaScript">
+        function toggle(source) {
+        checkboxes = document.getElementsByName('sync_options');
+        for(var checkbox in checkboxes)
+            checkboxes[checkbox].checked = source.checked;
+        }
+    </script>
+
+    <input type="checkbox" onClick="toggle(this)" /> Toggle All<br><br>
+
+    <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true">
+    <label for="sync_watchlist_choice"> Sync watchlist</label><br>
+    <input type="checkbox" id="sync_lists_choice" name="sync_options" value="true">
+    <label for="sync_lists_choice"> Sync all lists</label><br>
+    <input type="checkbox" id="sync_show_watch_history_choice" name="sync_options" value="true">
+    <label for="sync_show_watch_history_choice"> Sync show watch history</label><br>
+    <input type="checkbox" id="sync_movie_watch_history_choice" name="sync_options" value="true">
+    <label for="sync_movie_watch_history_choice"> Sync movie watch history</label><br>
+    <input type="checkbox" id="sync_show_resume_points_choice" name="sync_options" value="true">
+    <label for="sync_show_resume_points_choice"> Sync show progress/resume points</label><br>
+    <input type="checkbox" id="sync_movie_resume_points_choice" name="sync_options" value="true">
+    <label for="sync_movie_resume_points_choice"> Sync movie progress/resume points</label><br><br>
+    <input type="submit" value="Submit">
+    </form>
+
+    <script language="JavaScript">
+
+        function mark_form_as_hidden() {
+            form = document.querySelector("form");
+            if (form) {
+                form.style.display = "none";
+            }
+        }
+
         // Check if the user is authenticated
         fetch("/auth/status")
             .then(response => response.json())
@@ -37,6 +72,8 @@
                     pmdbStatusDot.classList.remove("status-green");
                     pmdbStatusDot.classList.add("status-red");
                     pmdbStatusText.innerText = "PublicMetaDb (Not Logged In)";
+
+                    mark_form_as_hidden();
                 }
 
                 if (data.trakt) {
@@ -47,6 +84,8 @@
                     traktStatusDot.classList.remove("status-green");
                     traktStatusDot.classList.add("status-red");
                     traktStatusText.innerText = "Trakt (Not Logged In)";
+
+                    mark_form_as_hidden();
                 }
             })
             .catch(error => {
@@ -94,7 +133,6 @@
             });
         }
     </script>
-    <p>Welcome to the Trakt migration page!</p>
 </body>
 
 </html>
