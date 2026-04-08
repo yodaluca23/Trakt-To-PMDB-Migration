@@ -76,6 +76,7 @@ def code_authorize_user() -> dict | None:
     interval = response.json().get("interval")
 
     open_new_tab(verification_url + "?code=" + user_code)
+    print(f"If the page doesn't open automatically, please visit {verification_url} and enter the code: {user_code}")
 
     while True:
         sleep(interval)
