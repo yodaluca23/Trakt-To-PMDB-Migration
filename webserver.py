@@ -50,6 +50,9 @@ def set_trakt_cookies(response: Response, data: dict) -> Response:
 
     data = add_user_information(data, create_trakt_headers(data))
 
+    if data is None:
+        raise HTTPException(status_code=500, detail="Failed to retrieve user information from Trakt")
+
     refresh_token_data = {
         "refresh_token": data.get("refresh_token", ""),
         "created_at": data.get("created_at", 0),
@@ -215,19 +218,24 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
 def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue):
     try:
         if sync_options.get("sync_lists_choice"):
-            sync_lists(sync_context, event_queue)
+            sync_lists(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing lists", "step": 1, "progress": 17})
         if sync_options.get("sync_movie_resume_points_choice"):
-            sync_movie_resume_points(sync_context, event_queue)
+            sync_movie_resume_points(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing movie resume points", "step": 2, "progress": 33})
         if sync_options.get("sync_movie_watch_history_choice"):
-            sync_movie_watch_history(sync_context, event_queue)
+            sync_movie_watch_history(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing movie watch history", "step": 3, "progress": 50})
         if sync_options.get("sync_show_resume_points_choice"):
-            sync_show_resume_points(sync_context, event_queue)
+            sync_show_resume_points(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing show resume points", "step": 4, "progress": 67})
         if sync_options.get("sync_show_watch_history_choice"):
-            sync_show_watch_history(sync_context, event_queue)
+            sync_show_watch_history(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing show watch history", "step": 5, "progress": 83})
         if sync_options.get("sync_watchlist_choice"):
-            sync_watchlist(sync_context, event_queue)
+            sync_watchlist(sync_context)
 
-        event_queue.put({"type": "complete", "message": "Migration complete"})
+        event_queue.put({"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()
@@ -247,7 +255,7 @@ def create_sync_job_dummy():
 
     def dummy_event_generator():
         for i in range(5):
-            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/5"})
+            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/5", "step": i+1, "progress": (i+1)*20, "complete": True if i == 4 else False})
             sleep(5)  # Simulate time taken for each step of the migration
         event_queue.put({"type": "complete", "message": "Dummy migration complete"})
 

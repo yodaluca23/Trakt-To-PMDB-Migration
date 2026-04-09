@@ -199,7 +199,7 @@ def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict) -> bool:
         log(f"Failed to add '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist: {response.status_code} - {response.text}", level="error", ctx=ctx)
     return False
 
-def sync_watchlist(ctx: SyncContext, event_queue: queue.Queue = None) -> bool:
+def sync_watchlist(ctx: SyncContext) -> bool:
     log("Syncing watchlist...", ctx=ctx)
     watchlist = fetch_watchlist(ctx)
     pmdb_watchlist_id = get_pmdb_watchlist_id(ctx)
@@ -273,7 +273,7 @@ def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list)
         log(f"Failed to create PMDB list '{trakt_list.get('name')}': {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
-def sync_lists(ctx: SyncContext, event_queue: queue.Queue = None, sync_all: bool = True) -> bool:
+def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
     trakt_lists = fetch_trakt_lists(ctx)
 
     #sync_all = input("Do you want to sync all lists? (y/n): ").lower().replace(" ", "") == "y"
@@ -359,7 +359,7 @@ def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
     else:
         return submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "movie", movie.get("last_watched_at", "1970-01-01T00:00:00.000Z"))
 
-def sync_movie_watch_history(ctx: SyncContext, event_queue: queue.Queue = None) -> bool:
+def sync_movie_watch_history(ctx: SyncContext) -> bool:
 
     log("Syncing movie watch history...", ctx=ctx)
 
@@ -457,7 +457,7 @@ def submit_history_show_to_pmdb(ctx: SyncContext, show: dict) -> bool:
 
     return all_success
 
-def sync_show_watch_history(ctx: SyncContext, event_queue: queue.Queue = None) -> bool:
+def sync_show_watch_history(ctx: SyncContext) -> bool:
     log("Syncing show watch history...", ctx=ctx)
 
     url = trakt_api_url + f"/users/{ctx.username}/watched/shows"
@@ -518,7 +518,7 @@ def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
         log(f"Failed to submit resume point for {media_label} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
-def sync_show_resume_points(ctx: SyncContext, event_queue: queue.Queue = None) -> bool:
+def sync_show_resume_points(ctx: SyncContext) -> bool:
     log("Syncing show resume points...", ctx=ctx)
 
     url = trakt_api_url + "/sync/playback/episodes"
@@ -544,7 +544,7 @@ def sync_show_resume_points(ctx: SyncContext, event_queue: queue.Queue = None) -
         log(f"Failed to fetch show resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
-def sync_movie_resume_points(ctx: SyncContext, event_queue: queue.Queue = None) -> bool:
+def sync_movie_resume_points(ctx: SyncContext) -> bool:
     log("Syncing movie resume points...", ctx=ctx)
 
     url = trakt_api_url + "/sync/playback/movies"

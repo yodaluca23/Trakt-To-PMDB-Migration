@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trakt Migration</title>
-    <link rel="stylesheet" href="/main.css">
+    <link rel="stylesheet" href="/main.css" />
 </head>
 
 <body>
@@ -23,32 +23,47 @@
 
     <script language="JavaScript">
         function toggle(source) {
-        checkboxes = document.getElementsByName('sync_options');
-        for(var checkbox in checkboxes)
-            checkboxes[checkbox].checked = source.checked;
+            checkboxes = document.getElementsByName("sync_options");
+            for (var checkbox in checkboxes)
+                checkboxes[checkbox].checked = source.checked;
         }
     </script>
 
     <form id="sync-form">
-    <input type="checkbox" onClick="toggle(this)" /> Toggle All<br><br>
+        <input type="checkbox" onClick="toggle(this)" /> Toggle All<br /><br />
 
-    <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true">
-    <label for="sync_watchlist_choice"> Sync watchlist</label><br>
-    <input type="checkbox" id="sync_lists_choice" name="sync_options" value="true">
-    <label for="sync_lists_choice"> Sync all lists</label><br>
-    <input type="checkbox" id="sync_show_watch_history_choice" name="sync_options" value="true">
-    <label for="sync_show_watch_history_choice"> Sync show watch history</label><br>
-    <input type="checkbox" id="sync_movie_watch_history_choice" name="sync_options" value="true">
-    <label for="sync_movie_watch_history_choice"> Sync movie watch history</label><br>
-    <input type="checkbox" id="sync_show_resume_points_choice" name="sync_options" value="true">
-    <label for="sync_show_resume_points_choice"> Sync show progress/resume points</label><br>
-    <input type="checkbox" id="sync_movie_resume_points_choice" name="sync_options" value="true">
-    <label for="sync_movie_resume_points_choice"> Sync movie progress/resume points</label><br><br>
-    <input type="button" id="sync-submit" value="Submit">
+        <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true" />
+        <label for="sync_watchlist_choice"> Sync watchlist</label><br />
+        <input type="checkbox" id="sync_lists_choice" name="sync_options" value="true" />
+        <label for="sync_lists_choice"> Sync all lists</label><br />
+        <input type="checkbox" id="sync_show_watch_history_choice" name="sync_options" value="true" />
+        <label for="sync_show_watch_history_choice">
+            Sync show watch history</label><br />
+        <input type="checkbox" id="sync_movie_watch_history_choice" name="sync_options" value="true" />
+        <label for="sync_movie_watch_history_choice">
+            Sync movie watch history</label><br />
+        <input type="checkbox" id="sync_show_resume_points_choice" name="sync_options" value="true" />
+        <label for="sync_show_resume_points_choice">
+            Sync show progress/resume points</label><br />
+        <input type="checkbox" id="sync_movie_resume_points_choice" name="sync_options" value="true" />
+        <label for="sync_movie_resume_points_choice">
+            Sync movie progress/resume points</label><br /><br />
+        <input type="button" id="sync-submit" value="Submit" />
     </form>
+    <br /><br />
+
+    <div class="sf-skill">
+        <span class="skill-icon"></span>
+        <div class="skill-content">
+            <h4 class="skill-title">Migration Progress</h4>
+            <p>The progress of your current migration job.</p>
+            <div class="skill-bar" style="--bar-width: 82%" data-progress="82%">
+                <span></span>
+            </div>
+        </div>
+    </div>
 
     <script language="JavaScript">
-
         const syncForm = document.getElementById("sync-form");
         const syncSubmitButton = document.getElementById("sync-submit");
 
@@ -58,28 +73,34 @@
         });
 
         syncSubmitButton.addEventListener("click", () => {
-
             // Build an object where each checkbox id maps to its checked state.
-            const syncOptions = Array.from(document.querySelectorAll("input[name='sync_options']"))
-                .reduce((options, checkbox) => {
-                    options[checkbox.id] = checkbox.checked;
-                    return options;
-                }, {});
+            const syncOptions = Array.from(
+                document.querySelectorAll("input[name='sync_options']"),
+            ).reduce((options, checkbox) => {
+                options[checkbox.id] = checkbox.checked;
+                return options;
+            }, {});
             fetch("/migrate", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
-                body: JSON.stringify(syncOptions)
+                body: JSON.stringify(syncOptions),
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert("Sync started successfully!");
-                } else {
-                    alert("Failed to start sync. Please try again.");
-                }
-            });
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.success) {
+                        alert(data.message);
+
+                        if (data.events_url) {
+                            // Store the events URL in local storage so the status page can use it to listen for updates.
+                            localStorage.setItem("events_url", data.events_url);
+                            location.reload(); // Reload the page to update the status indicators
+                        }
+                    } else {
+                        alert("Failed to start sync. Please try again.");
+                    }
+                });
         });
 
         function mark_form_as_hidden() {
@@ -91,12 +112,16 @@
 
         // Check if the user is authenticated
         fetch("/auth/status")
-            .then(response => response.json())
-            .then(data => {
+            .then((response) => response.json())
+            .then((data) => {
                 const pmdbStatusDot = document.querySelector(".pmdb-status");
-                const pmdbStatusText = document.querySelector(".pmdb-status + .status-text");
+                const pmdbStatusText = document.querySelector(
+                    ".pmdb-status + .status-text",
+                );
                 const traktStatusDot = document.querySelector(".trakt-status");
-                const traktStatusText = document.querySelector(".trakt-status + .status-text");
+                const traktStatusText = document.querySelector(
+                    ".trakt-status + .status-text",
+                );
 
                 if (data.pmdb) {
                     pmdbStatusDot.classList.remove("status-red");
@@ -122,17 +147,19 @@
                     mark_form_as_hidden();
                 }
             })
-            .catch(error => {
+            .catch((error) => {
                 console.error("Error checking PMDB authentication status:", error);
             });
 
         // Add click behavior to Trakt status text
-        const traktStatusTextLink = document.querySelector(".trakt-status + .status-text");
+        const traktStatusTextLink = document.querySelector(
+            ".trakt-status + .status-text",
+        );
         if (traktStatusTextLink) {
             traktStatusTextLink.addEventListener("click", () => {
                 fetch("/trakt/auth")
-                    .then(response => response.json())
-                    .then(data => {
+                    .then((response) => response.json())
+                    .then((data) => {
                         if (data.url) {
                             window.location.href = data.url; // Redirect to the authentication URL
                         } else {
@@ -143,7 +170,9 @@
         }
 
         // Add click behavior to PMDB status text
-        const pmdbStatusTextLink = document.querySelector(".pmdb-status + .status-text");
+        const pmdbStatusTextLink = document.querySelector(
+            ".pmdb-status + .status-text",
+        );
         if (pmdbStatusTextLink) {
             pmdbStatusTextLink.addEventListener("click", () => {
                 const apiKey = prompt("Please enter your PublicMetaDb API key:");
@@ -152,19 +181,64 @@
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
-                            "Authorization": `Bearer ${apiKey}`
+                            Authorization: `Bearer ${apiKey}`,
                         },
                     })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            location.reload(); // Reload the page to update the status
-                        } else {
-                            alert("Failed to save API key. Please try again.");
-                        }
-                    });
+                        .then((response) => response.json())
+                        .then((data) => {
+                            if (data.success) {
+                                location.reload(); // Reload the page to update the status
+                            } else {
+                                alert("Failed to save API key. Please try again.");
+                            }
+                        });
                 }
             });
+        }
+
+        function updateProgressBar(progress) {
+            const progressBar = document.querySelector(".skill-bar");
+            if (progressBar) {
+                progressBar.style.setProperty("--bar-width", `${progress}%`);
+                progressBar.setAttribute("data-progress", progress);
+            }
+        }
+
+        // Fetch migration event url from local storage and listen for updates
+        const eventsUrl = localStorage.getItem("events_url");
+        if (eventsUrl) {
+            mark_form_as_hidden(); // Hide the form if there's an active migration
+            const eventSource = new EventSource(eventsUrl);
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.progress) {
+                    // Update the progress bar width based on the progress value (0-100)
+                    updateProgressBar(data.progress);
+                }
+                if (data.status === "completed") {
+                    alert("Migration completed!");
+                    localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                    location.reload(); // Reload the page to reset the form and status indicators
+                }
+                if (data.status === "error") {
+                    alert(`Migration had an error: ${data.message}`);
+                }
+            };
+            eventSource.onerror = (error) => {
+                console.error("Error with event source:", error);
+                eventSource.close();
+                localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                alert("Connection lost. Please refresh the page.");
+            };
+        } else {
+            // No active migration, ensure the progress bar is reset and hidden
+            const progressBar = document.querySelector(".skill-bar");
+            const progressBox = document.querySelector(".sf-skill");
+            if (progressBar) {
+                progressBar.style.setProperty("--bar-width", "0%");
+                progressBar.setAttribute("data-progress", "0");
+                progressBox.style.display = "none"; // Hide the progress box when not in use
+            }
         }
     </script>
 </body>

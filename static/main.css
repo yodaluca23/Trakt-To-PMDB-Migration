@@ -1,6 +1,6 @@
 /* --------------------------------------------------- */
 /*  Snippflow Status Indicators with Pulsing Animation */
-/* https://snippflow.com/snippet/css-status-indicators-with-pulsing-animation/ */
+/* https://snippflow.com/snippet/css-status-indicators-with-pulsing-animation */
 /* --------------------------------------------------- */
 
 .sf-indicator {
@@ -57,3 +57,47 @@
 .status-green { background-color: var(--sf-indicator-green); }
 .status-red { background-color: var(--sf-indicator-red); }
 .status-orange { background-color: var(--sf-indicator-orange); }
+
+
+/* --------------------- */
+/*  Snippflow Skill Bars */
+/* https://snippflow.com/snippet/animated-skill-bar-with-percentage */
+/* --------------------- */
+
+.sf-skillbars { max-width: 600px; margin: 0 auto; }
+.sf-skillbars > h2 { text-align: center; }
+
+.sf-skill {
+  --sf-skill-bg: #fff;
+  --sf-skill-color: #3b495e;
+  --sf-skill-border: #e7e8ea;
+  --sf-skill-shadow: 0px 0px 8px 0px rgba(0,0,0,.06);
+  --sf-skill-icon-bg: rgba(0,0,0,.03);
+  --sf-skill-bar-bg: rgba(0,0,0,.05);
+  --sf-skill-bar-progress-bg: #63D9B3;
+  --sf-skill-bar-point-bg: #63D9B3;
+  --sf-skill-bar-point-border: #E8FFF7;
+}
+
+.sf-skill { display: flex; gap: 20px; background: var(--sf-skill-bg); border: 1px solid var(--sf-skill-border); color: var(--sf-skill-color); box-shadow: var(--sf-skill-shadow); padding: 25px 20px; border-radius: 8px; }
+.sf-skill ~ .sf-skill { margin-top: 10px; }
+.sf-skill .skill-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 80px; height: 80px; background-color: var( --sf-skill-icon-bg); border-radius: 4px; }
+.sf-skill .skill-icon > img { max-height: 40px; max-width: 40px; }
+.sf-skill .skill-content { flex-grow: 1; }
+.sf-skill .skill-content > * { margin: 0 0 5px; }
+.sf-skill .skill-content > *:last-child { margin-bottom: 0; }
+.sf-skill .skill-content .skill-title { font-size: 18px; font-weight: 500; color: #304050; }
+.sf-skill .skill-bar { display: flex; position: relative; width: calc(100% - 50px); height: 4px; border-radius: 4px; margin-top: 20px; background-color: var(--sf-skill-bar-bg); }
+.sf-skill .skill-bar:after { content: attr(data-progress); position: absolute; left: 100%; top: 50%; transform: translateY(-50%); background-color: #393939; color: #fff; font-size: 12px; border-radius: 3px; padding: 4px 0; width: 40px; text-align: center; line-height: 1; margin-left: 10px; }
+.sf-skill .skill-bar > span { display: block; position: relative; width: 0; height: 100%; background-color: var(--sf-skill-bar-progress-bg); animation: bar-animation 2s ease-in-out forwards; }
+.sf-skill .skill-bar > span:after { content: ""; width: 8px; height: 8px; border-radius: 100%; background-color: var(--sf-skill-bar-point-bg); border: 2px solid var(--sf-skill-bar-point-border); position: absolute; left: 100%; top: 50%; transform: translate(-6px,-6px); }
+
+@keyframes bar-animation {
+  from { width: 0; }
+  to { width: var(--bar-width); }
+}
+
+@media only screen and (max-width: 767px) {
+  .sf-skill { flex-direction: column; }
+  .sf-skill .skill-icon { width: 100%; }
+}
