@@ -1,22 +1,27 @@
 import os
 import json
-from webbrowser import open_new_tab
-import requests
-from datetime import datetime
 from time import sleep
+import requests
+import queue
+import threading
+import traceback
+from datetime import datetime
 from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import StreamingResponse
 import base64
 from pydantic import BaseModel
+from uuid import uuid4
 
 load_dotenv()
 
 app = FastAPI()
 
 session = requests.Session()
+
+running_jobs = []  # List to keep track of running jobs and their event queues
 
 class sync_options(BaseModel):
     sync_lists_choice: bool = False
@@ -58,7 +63,7 @@ def set_trakt_cookies(response: Response, data: dict) -> Response:
 
     return response
 
-def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool]:
+def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool, dict | None]:
     global trakt_api_url
 
     client_id = os.getenv("trakt_client")
@@ -79,12 +84,12 @@ def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Respons
     if res.status_code == 200:
         data = res.json()
         response = set_trakt_cookies(response, data)
-        return response, True
+        return response, True, data
     else:
         response.delete_cookie(key="trakt_auth")
         response.delete_cookie(key="trakt_auth_refresh")
 
-        return response, False
+        return response, False, None
 
 @app.get("/trakt/auth")
 def generate_trakt_authorization_url() -> dict:
@@ -180,7 +185,7 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
             pmdb_logged_in = False
 
     if trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
-        response, refreshed = refresh_trakt_token(response, trakt_auth_refresh)
+        response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
         if refreshed:
             trakt_logged_in = True
         else:
@@ -207,8 +212,52 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         "pmdb_user": pmdb_user
     }
 
-@app.post("/migrates")
-def migrate_data(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue):
+    try:
+        if sync_options.get("sync_lists_choice"):
+            sync_lists(sync_context, event_queue)
+        if sync_options.get("sync_movie_resume_points_choice"):
+            sync_movie_resume_points(sync_context, event_queue)
+        if sync_options.get("sync_movie_watch_history_choice"):
+            sync_movie_watch_history(sync_context, event_queue)
+        if sync_options.get("sync_show_resume_points_choice"):
+            sync_show_resume_points(sync_context, event_queue)
+        if sync_options.get("sync_show_watch_history_choice"):
+            sync_show_watch_history(sync_context, event_queue)
+        if sync_options.get("sync_watchlist_choice"):
+            sync_watchlist(sync_context, event_queue)
+
+        event_queue.put({"type": "complete", "message": "Migration complete"})
+    except Exception as e:
+        print(f"Error during migration: {e}")
+        traceback.print_exc()
+        event_queue.put({"type": "error", "message": f"Migration failed: {str(e)}"})
+
+def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Queue) -> tuple[str, queue.Queue, threading.Thread]:
+    job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
+    thread = threading.Thread(target=migrate_data, args=(sync_context, sync_options, event_queue))
+    return job_id, event_queue, thread
+
+# Used for testing the event streaming without running the actual migration logic
+def create_sync_job_dummy():
+    job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
+    print(f"Created dummy job with ID: {job_id}")
+    event_queue = queue.Queue()
+    running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": os.getenv("PMDB_API_KEY")})  # Add the new job to the list of running jobs with a dummy PMDB API key
+
+    def dummy_event_generator():
+        for i in range(5):
+            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/5"})
+            sleep(5)  # Simulate time taken for each step of the migration
+        event_queue.put({"type": "complete", "message": "Dummy migration complete"})
+
+    # Create a thread that simulates sending events to the queue
+    thread = threading.Thread(target=dummy_event_generator)
+    thread.start()
+    return job_id, event_queue, thread
+
+@app.post("/migrate")
+def request_data_migration(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
 
@@ -234,34 +283,67 @@ def migrate_data(sync_options: sync_options, response: Response, pmdb_auth: str 
         raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
     
     if (trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp():  # If token expires in less than 5 minutes
-        response, refreshed = refresh_trakt_token(response, trakt_auth_refresh)
-        if refreshed:
-            decoded_trakt_auth = base64.b64decode(response.cookies.get("trakt_auth")).decode()
-            trakt_auth = json.loads(decoded_trakt_auth)
-        else:
+        response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
+        if not refreshed:
             raise HTTPException(status_code=401, detail="Trakt authentication expired and refresh failed")
 
-    sync_context = build_sync_context(trakt_auth, pmdb_api_key)
+    try:
+        event_queue = queue.Queue()  # Create a new event queue for this job
+        sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue)
 
-    results = {}
+        sync_options_data = sync_options.model_dump()
+        job_id, event_queue, thread = create_sync_job(sync_context, sync_options_data, event_queue)  # Create the sync job and get the event queue
+        running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": pmdb_api_key})  # Add the new job to the list of running jobs
 
-    if sync_options.get("sync_watchlist"):
-        results["watchlist"] = sync_watchlist(sync_context)
+        thread.start()
+
+        return {"success": True, "job_id": job_id, "events_url": f"/migrate/{job_id}/events", "message": "Migration job started successfully"}
+    except Exception as e:
+        print(f"Error starting migration job: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to start migration job")
+
+def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
+    job = next((job for job in running_jobs if job["job_id"] == job_id), None)
+    if job:
+        if job["pmdb_api_key"] != pmdb_api_key:
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this job's events")
+    else:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    event_queue = job["event_queue"]
+
+    def event_generator():
+        while True:
+            try:
+                event = event_queue.get(timeout=1)  # Wait for an event with a timeout to allow checking for thread completion
+                yield f"data: {json.dumps(event)}\n\n"
+                if event.get("type") == "complete":
+                    break  # Stop streaming after completion or error
+            except queue.Empty:
+                continue  # No event, check again
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/migrate/{job_id}/events")
+def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)) -> StreamingResponse:
+    pmdb_api_key = None
+
+    if pmdb_auth:
+        try:
+            decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
+            pmdb_auth = json.loads(decoded_pmdb_auth)
+            pmdb_api_key = pmdb_auth.get("api_key", "")
+        except Exception as e:
+            print(f"Error decoding pmdb_auth cookie: {e}")
+            raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
+    else:
+        raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
     
-    if sync_options.get("sync_movie_resume_points"):
-        results["movie_resume_points"] = sync_movie_resume_points(sync_context)
-
-    if sync_options.get("sync_movie_watch_history"):
-        results["movie_watch_history"] = sync_movie_watch_history(sync_context)
-
-    if sync_options.get("sync_show_resume_points"):
-        results["show_resume_points"] = sync_show_resume_points(sync_context)
-
-    if sync_options.get("sync_show_watch_history"):
-        results["show_watch_history"] = sync_show_watch_history(sync_context)
-
-    return {"success": True, "results": results}
+    return stream_sync_job(job_id, pmdb_api_key)
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
 # `html=True` makes `/` resolve to `static/index.html` automatically.
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+#create_sync_job_dummy()  # Create a dummy job on startup to test the event streaming without running the actual migration logic
