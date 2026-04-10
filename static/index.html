@@ -53,17 +53,39 @@
     <br /><br />
 
     <div class="sf-skill">
-        <span class="skill-icon"></span>
+        <div class="loader"></div>
         <div class="skill-content">
             <h4 class="skill-title">Migration Progress</h4>
             <p>The progress of your current migration job.</p>
-            <div class="skill-bar" style="--bar-width: 82%" data-progress="82%">
+            <div class="skill-bar" style="--bar-width: 0%" data-progress="0%">
                 <span></span>
             </div>
         </div>
     </div>
 
+    <button id="view-logs-button">View Migration Logs</button>
+    <div class="migration-logs" style="display: none;">
+        <h4>Migration Logs</h4>
+        <pre id="migration-logs-content"></pre>
+    </div>
+
     <script language="JavaScript">
+        const logsButton = document.getElementById("view-logs-button");
+        const logsContainer = document.querySelector(".migration-logs");
+        const logsContent = document.getElementById("migration-logs-content");
+
+        logsButton.addEventListener("click", () => {
+            if (logsContainer.style.display === "none") {
+                const logs = localStorage.getItem("migration_logs") || "No logs available.";
+                logsContent.textContent = logs;
+                logsContainer.style.display = "block";
+                logsButton.textContent = "Hide Migration Logs";
+            } else {
+                logsContainer.style.display = "none";
+                logsButton.textContent = "View Migration Logs";
+            }
+        });
+        
         const syncForm = document.getElementById("sync-form");
         const syncSubmitButton = document.getElementById("sync-submit");
 
@@ -95,6 +117,7 @@
                         if (data.events_url) {
                             // Store the events URL in local storage so the status page can use it to listen for updates.
                             localStorage.setItem("events_url", data.events_url);
+                            localStorage.removeItem("migration_logs"); // Clear any existing logs
                             location.reload(); // Reload the page to update the status indicators
                         }
                     } else {
@@ -204,6 +227,15 @@
             }
         }
 
+        // Track intentional page teardown so refresh/navigation does not trigger error cleanup.
+        let isPageUnloading = false;
+        window.addEventListener("beforeunload", () => {
+            isPageUnloading = true;
+        });
+        window.addEventListener("pagehide", () => {
+            isPageUnloading = true;
+        });
+
         // Fetch migration event url from local storage and listen for updates
         const eventsUrl = localStorage.getItem("events_url");
         if (eventsUrl) {
@@ -211,6 +243,18 @@
             const eventSource = new EventSource(eventsUrl);
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
+
+                // Append new logs to the existing logs in local storage
+                if (data) {
+                    const existingLogs = localStorage.getItem("migration_logs") || "";
+                    const updatedLogs = existingLogs + JSON.stringify(data) + "\n";
+                    localStorage.setItem("migration_logs", updatedLogs);
+
+                    if (logsContainer.style.display === "block") {
+                        logsContent.textContent = updatedLogs; // Update logs display if it's currently visible
+                    }
+                }
+
                 if (data.progress) {
                     // Update the progress bar width based on the progress value (0-100)
                     updateProgressBar(data.progress);
@@ -225,8 +269,12 @@
                 }
             };
             eventSource.onerror = (error) => {
-                console.error("Error with event source:", error);
+                if (isPageUnloading) {
+                    eventSource.close();
+                    return;
+                }
                 eventSource.close();
+                console.error("Error with event source:", error);
                 localStorage.removeItem("events_url"); // Clear the events URL from local storage
                 alert("Connection lost. Please refresh the page.");
             };

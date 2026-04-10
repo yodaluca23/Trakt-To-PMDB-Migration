@@ -101,3 +101,22 @@
   .sf-skill { flex-direction: column; }
   .sf-skill .skill-icon { width: 100%; }
 }
+
+/* HTML: <div class="loader"></div> */
+/* https://css-loaders.com/dots */
+.loader {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 40px;
+  aspect-ratio: 1 / 1;
+  --_g: no-repeat radial-gradient(farthest-side,#000 90%,#0000);
+  background: 
+    var(--_g) 50%  0,
+    var(--_g) 0    100%,
+    var(--_g) 100% 100%;
+  background-size: 35% calc(35%*1);
+  animation: l16 1s infinite;
+}
+@keyframes l16{ 
+    50%,100% {background-position: 100% 100%,50% 0,0 100%} 
+}

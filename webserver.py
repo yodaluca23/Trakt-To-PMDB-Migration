@@ -10,7 +10,7 @@ from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_mo
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 import base64
 from pydantic import BaseModel
 from uuid import uuid4
@@ -23,6 +23,27 @@ session = requests.Session()
 
 running_jobs = []  # List to keep track of running jobs and their event queues
 
+jobs_lock = threading.Lock()  # Lock to synchronize access to the running_jobs list
+
+def get_running_job(job_id: str) -> dict | None:
+    global running_jobs
+
+    with jobs_lock:
+        job = next((job for job in running_jobs if job["job_id"] == job_id), None)
+    return job
+
+def remove_job(job_id: str):
+    global running_jobs
+
+    with jobs_lock:
+        running_jobs = [job for job in running_jobs if job["job_id"] != job_id]
+
+def add_job(job_id: str, event_queue: queue.Queue, pmdb_api_key: str):
+    global running_jobs
+
+    with jobs_lock:
+        running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": pmdb_api_key})
+    
 class sync_options(BaseModel):
     sync_lists_choice: bool = False
     sync_movie_resume_points_choice: bool = False
@@ -215,7 +236,7 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         "pmdb_user": pmdb_user
     }
 
-def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue):
+def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue, job_id: str):
     try:
         if sync_options.get("sync_lists_choice"):
             sync_lists(sync_context)
@@ -236,6 +257,8 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
             sync_watchlist(sync_context)
 
         event_queue.put({"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
+
+        remove_job(job_id)  # Remove the job from the running jobs list after completion
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()
@@ -243,21 +266,22 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
 
 def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Queue) -> tuple[str, queue.Queue, threading.Thread]:
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
-    thread = threading.Thread(target=migrate_data, args=(sync_context, sync_options, event_queue))
+    thread = threading.Thread(target=migrate_data, args=(sync_context, sync_options, event_queue, job_id))
     return job_id, event_queue, thread
 
 # Used for testing the event streaming without running the actual migration logic
 def create_sync_job_dummy():
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
-    print(f"Created dummy job with ID: {job_id}")
+    print(f"Created dummy job with ID:\n{job_id}\nJob URL:\n/migrate/{job_id}/events")
     event_queue = queue.Queue()
-    running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": os.getenv("PMDB_API_KEY")})  # Add the new job to the list of running jobs with a dummy PMDB API key
+    add_job(job_id, event_queue, os.getenv("PMDB_API_KEY"))  # Add the new job to the list of running jobs with a dummy PMDB API key
 
     def dummy_event_generator():
         for i in range(5):
             event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/5", "step": i+1, "progress": (i+1)*20, "complete": True if i == 4 else False})
-            sleep(5)  # Simulate time taken for each step of the migration
+            sleep(15)  # Simulate time taken for each step of the migration
         event_queue.put({"type": "complete", "message": "Dummy migration complete"})
+        remove_job(job_id)  # Remove the job from the running jobs list after completion
 
     # Create a thread that simulates sending events to the queue
     thread = threading.Thread(target=dummy_event_generator)
@@ -301,7 +325,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
 
         sync_options_data = sync_options.model_dump()
         job_id, event_queue, thread = create_sync_job(sync_context, sync_options_data, event_queue)  # Create the sync job and get the event queue
-        running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": pmdb_api_key})  # Add the new job to the list of running jobs
+        add_job(job_id, event_queue, pmdb_api_key)  # Add the new job to the list of running jobs
 
         thread.start()
 
@@ -312,7 +336,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
         raise HTTPException(status_code=500, detail="Failed to start migration job")
 
 def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
-    job = next((job for job in running_jobs if job["job_id"] == job_id), None)
+    job = get_running_job(job_id)
     if job:
         if job["pmdb_api_key"] != pmdb_api_key:
             raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this job's events")
@@ -327,7 +351,7 @@ def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
                 event = event_queue.get(timeout=1)  # Wait for an event with a timeout to allow checking for thread completion
                 yield f"data: {json.dumps(event)}\n\n"
                 if event.get("type") == "complete":
-                    break  # Stop streaming after completion or error
+                    break  # Stop streaming after completion
             except queue.Empty:
                 continue  # No event, check again
 
@@ -349,6 +373,10 @@ def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
     
     return stream_sync_job(job_id, pmdb_api_key)
+
+@app.get(os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") if os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") != "/trakt/callback" else "/trakt/callback_fallback")
+def trakt_callback_fallback(code: str | None = None):
+    return RedirectResponse(url=f"/trakt/callback?code={code}", status_code=301)
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
 # `html=True` makes `/` resolve to `static/index.html` automatically.
