@@ -14,6 +14,24 @@ from fastapi.responses import StreamingResponse, RedirectResponse
 import base64
 from pydantic import BaseModel
 from uuid import uuid4
+import signal
+import sys
+
+# Define SIGTERM handler
+def graceful_shutdown(signum, frame):
+
+    # Wait for all running jobs to finish
+    while True:
+        with jobs_lock:
+            if not running_jobs:
+                break  # Exit the loop if there are no running jobs
+        print("Waiting for running jobs to finish before shutting down...")
+        sleep(5)  # Wait for a few seconds before checking again
+
+    sys.exit(0)
+
+# Register handler for SIGTERM  
+signal.signal(signal.SIGTERM, graceful_shutdown)
 
 load_dotenv()
 
