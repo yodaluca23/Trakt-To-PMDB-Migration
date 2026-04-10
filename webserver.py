@@ -277,8 +277,8 @@ def create_sync_job_dummy():
     add_job(job_id, event_queue, os.getenv("PMDB_API_KEY"))  # Add the new job to the list of running jobs with a dummy PMDB API key
 
     def dummy_event_generator():
-        for i in range(5):
-            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/5", "step": i+1, "progress": (i+1)*20, "complete": True if i == 4 else False})
+        for i in range(6):
+            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/6", "step": i+1, "progress": round((i+1)/6 * 100, 0), "complete": True if i == 5 else False})
             sleep(15)  # Simulate time taken for each step of the migration
         event_queue.put({"type": "complete", "message": "Dummy migration complete"})
         remove_job(job_id)  # Remove the job from the running jobs list after completion
