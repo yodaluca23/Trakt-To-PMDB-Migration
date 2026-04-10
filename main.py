@@ -29,10 +29,10 @@ class SyncContext:
     event_queue: queue.Queue | None = None
 
     @property
-    def username(self):
+    def username(self) -> str:
         return self.token_data.get("user_info", {}).get("user", {}).get("username")
     
-def log(message: str, ctx: SyncContext = None, level: str = "info"):
+def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
     event_queue = ctx.event_queue if ctx else None
 
     if event_queue:
@@ -140,6 +140,9 @@ def fetch_watchlist(ctx: SyncContext) -> list | None:
         watchlist = response.json()
         log(f"Watchlist fetched successfully. Total items: {len(watchlist)}", ctx=ctx)
         return watchlist
+    else:
+        log(f"Failed to fetch watchlist: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return []
 
 def get_pmdb_watchlist_id(ctx: SyncContext) -> str | None:
     log("Retrieving PMDB watchlist ID...", ctx=ctx)

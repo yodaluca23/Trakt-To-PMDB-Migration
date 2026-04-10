@@ -19,7 +19,7 @@ Planned features and improvements:
 
 - Only migrate select lists.
 - A desktop GUI so migration can be run without using the terminal.
-- A website interface for account connection and migration management.
+- ~~A website interface for account connection and migration management.~~
 - Packaged desktop builds:
 	- Windows `.exe`
 	- macOS `.dmg`
@@ -30,7 +30,7 @@ Planned features and improvements:
 - A Trakt API app (client ID + client secret)
 - A PMDB API key
 
-## Setup
+## Local User Setup
 
 1. Clone this repository.
 2. Create and activate a virtual environment.
@@ -49,12 +49,12 @@ cp .env.example .env
 Then edit `.env`:
 
 ```env
-pmdb_api_key=YOUR_PMDB_API_KEY
-trakt_client=YOUR_TRAKT_CLIENT_ID
-trakt_secret=YOUR_TRAKT_CLIENT_SECRET
+pmdb_api_key=Required
+trakt_client=Required
+trakt_secret=Required
 ```
 
-## First run and authentication
+## Local User First run and authentication
 
 Run:
 
@@ -73,7 +73,7 @@ On later runs:
 - If `token.json` is still valid, it is reused.
 - If expired, it is refreshed automatically.
 
-## How migration works
+### How migration works
 
 When you run `user.py`, you can either:
 
@@ -85,6 +85,62 @@ When you run `user.py`, you can either:
 	- Movie watch history
     - Show resume points
     - Movie resume points
+
+## Webserver Usage
+
+The web UI is served by `webserver.py` and uses browser cookies for auth state.
+
+### 1. Configure `.env` for web mode
+
+Required values:
+
+```env
+trakt_client=Required
+trakt_secret=Required
+domain=http://127.0.0.1:8000
+trakt_redirect_uri=/trakt/callback
+cookie_encryption_key=Required
+```
+You can generate a random `cookie_encryption_key` using Fernet:
+
+```python
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Notes:
+
+- Keep `domain` aligned with where you actually run the app.
+- If you host behind HTTPS in production, set `domain` to your HTTPS URL.
+
+### 2. Start the webserver
+
+From the project root:
+
+```bash
+source .venv/bin/activate
+fastapi dev webserver.py
+```
+
+Then open `http://127.0.0.1:8000` in your browser.
+
+### 3. Authenticate accounts in the UI
+
+1. Click the Trakt status text and complete OAuth.
+2. Click the PublicMetaDb status text and paste your PMDB API key.
+3. Wait until both indicators turn green.
+
+### 4. Start a migration job
+
+1. Select the migration options you want.
+2. Click **Submit**.
+3. Watch live progress indicators and the progress bar.
+4. Use **View Migration Logs** to inspect job output.
+
+### 5. Reconnect behavior
+
+- If you refresh, the UI resumes from stored job state when possible.
+- Trakt tokens are refreshed automatically when needed.
+- If auth expires or cookies are invalid, re-authenticate from the status links.
 
 ## Other scripts
 
@@ -98,6 +154,7 @@ Use `debug.py` carefully because it deletes watch history records from The Publi
 - PublicMetaDb list creation for custom Trakt lists currently creates new PublicMetaDb lists as part of migration.
 - Mapping from Trakt IDs to TMDB IDs is attempted when TMDB IDs are missing.
 - Console output is the primary logging mechanism.
+- Authorization tokens are stored in `token.json` for reuse and refresh. Treat this file as sensitive since it contains OAuth tokens.
 
 ## Troubleshooting
 
@@ -115,3 +172,6 @@ Use `debug.py` carefully because it deletes watch history records from The Publi
 
 - Never commit real secrets in `.env`.
 - `token.json` contains OAuth tokens; treat it as sensitive.
+- Their is no CSRF protection on the webserver endpoints.
+- Their is no content security policy on the webserver endpoints.
+- The webserver should only be run locally behind a trusted firewall or in production with proper security measures in place.

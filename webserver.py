@@ -16,9 +16,10 @@ from pydantic import BaseModel
 from uuid import uuid4
 import signal
 import sys
+from cryptography.fernet import Fernet
 
 # Define SIGTERM handler
-def graceful_shutdown(signum, frame):
+def graceful_shutdown(signum: int, frame: any) -> None:
 
     # Wait for all running jobs to finish
     while True:
@@ -50,13 +51,13 @@ def get_running_job(job_id: str) -> dict | None:
         job = next((job for job in running_jobs if job["job_id"] == job_id), None)
     return job
 
-def remove_job(job_id: str):
+def remove_job(job_id: str) -> None:
     global running_jobs
 
     with jobs_lock:
         running_jobs = [job for job in running_jobs if job["job_id"] != job_id]
 
-def add_job(job_id: str, event_queue: queue.Queue, pmdb_api_key: str):
+def add_job(job_id: str, event_queue: queue.Queue, pmdb_api_key: str) -> None:
     global running_jobs
 
     with jobs_lock:
@@ -85,6 +86,28 @@ class sync_options(BaseModel):
         }
     }
 
+def decode_cookie(cookie_value: str) -> dict | None:
+    try:
+        encryption_key = os.getenv("cookie_encryption_key")
+
+        decoded = base64.b64decode(cookie_value).decode()
+        decrypted = Fernet(encryption_key).decrypt(decoded.encode()).decode()
+        return json.loads(base64.urlsafe_b64decode(decrypted).decode())
+    except Exception as e:
+        print(f"Error decoding cookie: {e}")
+        return None
+    
+def encode_cookie(data: dict) -> str | None:
+    try:
+        encryption_key = os.getenv("cookie_encryption_key")
+
+        encoded = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+        encrypted = Fernet(encryption_key).encrypt(encoded.encode()).decode()
+        return base64.b64encode(encrypted.encode()).decode()
+    except Exception as e:
+        print(f"Error encoding cookie: {e}")
+        return None
+
 def set_trakt_cookies(response: Response, data: dict) -> Response:
 
     data = add_user_information(data, create_trakt_headers(data))
@@ -98,10 +121,10 @@ def set_trakt_cookies(response: Response, data: dict) -> Response:
         "expires_in": data.get("expires_in", 0)
     }
 
-    cookies = base64.b64encode(json.dumps(data).encode()).decode()
-    refresh_token = base64.b64encode(json.dumps(refresh_token_data).encode()).decode()
-    response.set_cookie(key="trakt_auth", value=cookies, httponly=True, max_age=data.get("expires_in", 3600), samesite="strict")
-    response.set_cookie(key="trakt_auth_refresh", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="strict")  # Set refresh token cookie for 30 days
+    cookies = encode_cookie(data)
+    refresh_token = encode_cookie(refresh_token_data)
+    response.set_cookie(key="trakt_auth", value=cookies, httponly=True, max_age=data.get("expires_in", 3600), samesite="strict", secure=False if os.getenv("domain", "http://127.0.0.1:8000").startswith("http://") else True)  # Set access token cookie with expiration time, secure flag if domain is set
+    response.set_cookie(key="trakt_auth_refresh", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="strict", secure=False if os.getenv("domain", "http://127.0.0.1:8000").startswith("http://") else True)  # Set refresh token cookie for 30 days
 
     return response
 
@@ -194,9 +217,9 @@ def authenticate_pmdb_user(response: Response, Authorization: str = Header(defau
     pmdb_auth = {
         "api_key": api_key
     }
-    cookie = base64.b64encode(json.dumps(pmdb_auth).encode()).decode()
+    cookie = encode_cookie(pmdb_auth)
 
-    response.set_cookie(key="pmdb_auth", value=cookie, httponly=True, max_age=30*24*3600, samesite="strict")  # Set PMDB auth cookie for 30 days
+    response.set_cookie(key="pmdb_auth", value=cookie, httponly=True, max_age=30*24*3600, samesite="strict", secure=False if os.getenv("domain", "http://127.0.0.1:8000").startswith("http://") else True)  # Set PMDB auth cookie for 30 days
     return {"success": True, "message": "PMDB authentication successful"}
 
 @app.get("/auth/status")
@@ -210,21 +233,18 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
 
     # Decode the auth cookies from base64
     if trakt_auth:
-        try:
-            decoded_trakt_auth = base64.b64decode(trakt_auth).decode()
-            trakt_auth = json.loads(decoded_trakt_auth)
-        except Exception as e:
-            print(f"Error decoding trakt_auth cookie: {e}")
+        trakt_auth = decode_cookie(trakt_auth)
+        if not trakt_auth:
+            print("Failed to decode trakt_auth cookie")
             trakt_logged_in = False
-    
+
     if pmdb_auth:
-        try:
-            decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
-            pmdb_auth = json.loads(decoded_pmdb_auth)
-            pmdb_auth = pmdb_auth.get("api_key", "")
-        except Exception as e:
-            print(f"Error decoding pmdb_auth cookie: {e}")
+        pmdb_auth = decode_cookie(pmdb_auth)
+        if not pmdb_auth:
+            print("Failed to decode pmdb_auth cookie")
             pmdb_logged_in = False
+        else:
+            pmdb_auth = pmdb_auth.get("api_key", "")
 
     if trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
         response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
@@ -254,7 +274,7 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         "pmdb_user": pmdb_user
     }
 
-def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue, job_id: str):
+def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue, job_id: str) -> None:
     try:
         if sync_options.get("sync_lists_choice"):
             sync_lists(sync_context)
@@ -288,13 +308,13 @@ def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Q
     return job_id, event_queue, thread
 
 # Used for testing the event streaming without running the actual migration logic
-def create_sync_job_dummy():
+def create_sync_job_dummy() -> tuple[str, queue.Queue, threading.Thread]:
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
     print(f"Created dummy job with ID:\n{job_id}\nJob URL:\n/migrate/{job_id}/events")
     event_queue = queue.Queue()
     add_job(job_id, event_queue, os.getenv("PMDB_API_KEY"))  # Add the new job to the list of running jobs with a dummy PMDB API key
 
-    def dummy_event_generator():
+    def dummy_event_generator() -> None:
         for i in range(6):
             event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/6", "step": i+1, "progress": round((i+1)/6 * 100, 0), "complete": True if i == 5 else False})
             sleep(15)  # Simulate time taken for each step of the migration
@@ -308,31 +328,30 @@ def create_sync_job_dummy():
 
 @app.post("/migrate")
 def request_data_migration(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+    
+    needTraktRefresh = False
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
+        needTraktRefresh = True  # Indicate that the token is not fully valid and needs to be refreshed on the server side
 
     if not trakt_auth:
         raise HTTPException(status_code=401, detail="Not authenticated with Trakt")
     if not pmdb_auth:
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
 
-    # Decode the auth cookies from base64
-    try:
-        decoded_trakt_auth = base64.b64decode(trakt_auth).decode()
-        trakt_auth = json.loads(decoded_trakt_auth)
-    except Exception as e:
-        print(f"Error decoding trakt_auth cookie: {e}")
+    # Decode the auth cookies
+    trakt_auth = decode_cookie(trakt_auth)
+    if not trakt_auth:
+        print("Failed to decode trakt_auth cookie")
         raise HTTPException(status_code=400, detail="Invalid Trakt authentication cookie")
     
-    try:
-        decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
-        pmdb_auth = json.loads(decoded_pmdb_auth)
-        pmdb_api_key = pmdb_auth.get("api_key", "")
-    except Exception as e:
-        print(f"Error decoding pmdb_auth cookie: {e}")
+    pmdb_auth = decode_cookie(pmdb_auth)
+    pmdb_api_key = pmdb_auth.get("api_key", "") if pmdb_auth else None
+    if not pmdb_api_key:
+        print("Failed to decode pmdb_auth cookie")
         raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
     
-    if (trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp():  # If token expires in less than 5 minutes
+    if needTraktRefresh or ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
         response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
         if not refreshed:
             raise HTTPException(status_code=401, detail="Trakt authentication expired and refresh failed")
@@ -363,7 +382,7 @@ def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
 
     event_queue = job["event_queue"]
 
-    def event_generator():
+    def event_generator() -> any:
         while True:
             try:
                 event = event_queue.get(timeout=1)  # Wait for an event with a timeout to allow checking for thread completion
@@ -380,12 +399,9 @@ def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)
     pmdb_api_key = None
 
     if pmdb_auth:
-        try:
-            decoded_pmdb_auth = base64.b64decode(pmdb_auth).decode()
-            pmdb_auth = json.loads(decoded_pmdb_auth)
-            pmdb_api_key = pmdb_auth.get("api_key", "")
-        except Exception as e:
-            print(f"Error decoding pmdb_auth cookie: {e}")
+        pmdb_auth = decode_cookie(pmdb_auth)
+        pmdb_api_key = pmdb_auth.get("api_key", "")
+        if not pmdb_api_key:
             raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
     else:
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
@@ -393,7 +409,7 @@ def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)
     return stream_sync_job(job_id, pmdb_api_key)
 
 @app.get(os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") if os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") != "/trakt/callback" else "/trakt/callback_fallback")
-def trakt_callback_fallback(code: str | None = None):
+def trakt_callback_fallback(code: str | None = None) -> RedirectResponse:
     return RedirectResponse(url=f"/trakt/callback?code={code}", status_code=301)
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
