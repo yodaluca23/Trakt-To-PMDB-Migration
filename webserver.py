@@ -14,34 +14,29 @@ from fastapi.responses import StreamingResponse, RedirectResponse
 import base64
 from pydantic import BaseModel
 from uuid import uuid4
-import signal
-import sys
 from cryptography.fernet import Fernet
+from contextlib import asynccontextmanager
+import asyncio
 
 # Define SIGTERM handler
-def graceful_shutdown(signum: int, frame: any) -> None:
+shutdown_requested = threading.Event()
 
-    # Wait for all running jobs to finish
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    shutdown_requested.set()
     while True:
         with jobs_lock:
-            if not running_jobs:
-                break  # Exit the loop if there are no running jobs
-        print("Waiting for running jobs to finish before shutting down...")
-        sleep(5)  # Wait for a few seconds before checking again
+            remaining = len(running_jobs)
+        if remaining == 0:
+            break
+        print(f"Shutdown waiting for {remaining} running migration job(s)...")
+        await asyncio.sleep(5)  # Wait before checking again
 
-    sys.exit(0)
-
-# Register handler for SIGTERM  
-signal.signal(signal.SIGTERM, graceful_shutdown)
-
+app = FastAPI(lifespan=lifespan)
 load_dotenv()
-
-app = FastAPI()
-
 session = requests.Session()
-
 running_jobs = []  # List to keep track of running jobs and their event queues
-
 jobs_lock = threading.Lock()  # Lock to synchronize access to the running_jobs list
 
 def get_running_job(job_id: str) -> dict | None:
@@ -63,6 +58,14 @@ def add_job(job_id: str, event_queue: queue.Queue, pmdb_api_key: str) -> None:
     with jobs_lock:
         running_jobs.append({"job_id": job_id, "event_queue": event_queue, "pmdb_api_key": pmdb_api_key})
     
+def search_running_jobs(pmdb_api_key: str) -> list:
+    global running_jobs
+
+    jobs = []
+    with jobs_lock:
+        jobs = [job for job in running_jobs if job["pmdb_api_key"] == pmdb_api_key]
+    return jobs
+
 class sync_options(BaseModel):
     sync_lists_choice: bool = False
     sync_movie_resume_points_choice: bool = False
@@ -225,8 +228,11 @@ def authenticate_pmdb_user(response: Response, Authorization: str = Header(defau
 @app.get("/auth/status")
 def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
 
+    needTraktRefresh = False
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
+        needTraktRefresh = True  # Indicate that the token is not fully valid and needs to be refreshed on the server side
+
 
     trakt_logged_in = trakt_auth is not None
     pmdb_logged_in = pmdb_auth is not None
@@ -246,7 +252,7 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         else:
             pmdb_auth = pmdb_auth.get("api_key", "")
 
-    if trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
+    if needTraktRefresh or (trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp())):  # If token expires in less than 5 minutes
         response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
         if refreshed:
             trakt_logged_in = True
@@ -300,7 +306,8 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()
-        event_queue.put({"type": "error", "message": f"Migration failed: {str(e)}"})
+        event_queue.put({"type": "critical", "message": f"Migration failed: {str(e)}"})
+        remove_job(job_id)  # Remove the job from the running jobs list after completion
 
 def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Queue) -> tuple[str, queue.Queue, threading.Thread]:
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
@@ -328,7 +335,9 @@ def create_sync_job_dummy() -> tuple[str, queue.Queue, threading.Thread]:
 
 @app.post("/migrate")
 def request_data_migration(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
-    
+    if shutdown_requested.is_set():
+        raise HTTPException(status_code=503, detail="Server is shutting down; new migrations are disabled")
+
     needTraktRefresh = False
     if (not trakt_auth) and trakt_auth_refresh:
         trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
@@ -356,6 +365,10 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
         if not refreshed:
             raise HTTPException(status_code=401, detail="Trakt authentication expired and refresh failed")
 
+    existing_jobs = search_running_jobs(pmdb_api_key)
+    if existing_jobs:
+        raise HTTPException(status_code=409, detail="A migration job is already running for this PMDB account. Please wait for it to complete before starting a new one.")
+    
     try:
         event_queue = queue.Queue()  # Create a new event queue for this job
         sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue)
@@ -399,8 +412,8 @@ def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)
     pmdb_api_key = None
 
     if pmdb_auth:
-        pmdb_auth = decode_cookie(pmdb_auth)
-        pmdb_api_key = pmdb_auth.get("api_key", "")
+        pmdb_auth = decode_cookie(pmdb_auth) if pmdb_auth else None
+        pmdb_api_key = pmdb_auth.get("api_key", "") if pmdb_auth else None
         if not pmdb_api_key:
             raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
     else:
