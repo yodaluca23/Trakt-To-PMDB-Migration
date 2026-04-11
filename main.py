@@ -30,7 +30,7 @@ class SyncContext:
 
     @property
     def username(self) -> str:
-        return self.token_data.get("user_info", {}).get("user", {}).get("username")
+        return self.token_data.get("username", "")
     
 def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
     event_queue = ctx.event_queue if ctx else None
@@ -65,7 +65,7 @@ def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
     if response.status_code == 200:
         user_info = response.json()
         #log(f"User information retrieved: {user_info.get('user').get('username')}")
-        token_data["user_info"] = user_info
+        token_data["username"] = user_info.get("user").get("username")
         return token_data
     else:
         log(f"Failed to retrieve user information: {response.status_code} - {response.text}", level="error")

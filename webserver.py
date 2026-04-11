@@ -266,7 +266,7 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
     pmdb_user = None
 
     if trakt_logged_in and trakt_auth:
-        trakt_user = trakt_auth.get("user_info", {}).get("user", {}).get("username")
+        trakt_user = trakt_auth.get("username", "")
 
     if pmdb_logged_in and pmdb_auth:
         pmdb_user = pmdb_auth[:15] + "..."  # Show only the first 15 characters of the PMDB API key for privacy
