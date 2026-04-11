@@ -282,23 +282,28 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
 
 def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queue, job_id: str) -> None:
     try:
-        if sync_options.get("sync_lists_choice"):
-            sync_lists(sync_context)
-            event_queue.put({"type": "progress", "message": "Finished syncing lists", "step": 1, "progress": 17})
-        if sync_options.get("sync_movie_resume_points_choice"):
-            sync_movie_resume_points(sync_context)
-            event_queue.put({"type": "progress", "message": "Finished syncing movie resume points", "step": 2, "progress": 33})
-        if sync_options.get("sync_movie_watch_history_choice"):
-            sync_movie_watch_history(sync_context)
-            event_queue.put({"type": "progress", "message": "Finished syncing movie watch history", "step": 3, "progress": 50})
-        if sync_options.get("sync_show_resume_points_choice"):
-            sync_show_resume_points(sync_context)
-            event_queue.put({"type": "progress", "message": "Finished syncing show resume points", "step": 4, "progress": 67})
-        if sync_options.get("sync_show_watch_history_choice"):
-            sync_show_watch_history(sync_context)
-            event_queue.put({"type": "progress", "message": "Finished syncing show watch history", "step": 5, "progress": 83})
         if sync_options.get("sync_watchlist_choice"):
             sync_watchlist(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 17})
+
+        if sync_options.get("sync_lists_choice"):
+            sync_lists(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 33})
+
+        if sync_options.get("sync_show_watch_history_choice"):
+            sync_show_watch_history(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing show watch history", "step": 3, "progress": 50})
+
+        if sync_options.get("sync_movie_watch_history_choice"):
+            sync_movie_watch_history(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
+
+        if sync_options.get("sync_show_resume_points_choice"):
+            sync_show_resume_points(sync_context)
+            event_queue.put({"type": "progress", "message": "Finished syncing show resume points", "step": 5, "progress": 83})
+            
+        if sync_options.get("sync_movie_resume_points_choice"):
+            sync_movie_resume_points(sync_context)
 
         event_queue.put({"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
 
