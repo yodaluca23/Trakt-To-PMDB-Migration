@@ -37,7 +37,7 @@ def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
 
     if event_queue:
         event_queue.put({"type": "log", "message": message, "level": level})
-    elif os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py":
+    elif (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py") or os.getenv("log_to_console", "true").lower() == "true":
         print(f"[{level.upper()}] {message}")
 
 def create_trakt_headers(token_data: dict = None) -> dict:
