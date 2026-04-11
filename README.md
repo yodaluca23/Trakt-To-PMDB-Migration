@@ -37,12 +37,17 @@ Planned features and improvements:
 3. Install dependencies.
 4. Create a `.env` file from `.env.example`.
 
+For the CLI migration flow (`user.py`), install from `requirements.txt`.
+For the web UI (`webserver.py`), install from `requirements_webserver.txt`.
+
 Example:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+# or, for webserver usage:
+# pip install -r requirements_webserver.txt
 cp .env.example .env
 ```
 
@@ -118,7 +123,8 @@ From the project root:
 
 ```bash
 source .venv/bin/activate
-fastapi dev webserver.py
+pip install -r requirements_webserver.txt
+fastapi run webserver.py
 ```
 
 Then open `http://127.0.0.1:8000` in your browser.
@@ -166,7 +172,9 @@ Use `debug.py` carefully because it deletes watch history records from The Publi
 	- Check terminal output for PMDB API errors.
 - Dependency import errors:
 	- Re-activate your virtual environment.
-	- Reinstall packages with `pip install -r requirements.txt`.
+	- Reinstall packages with the correct file:
+		- `pip install -r requirements.txt` for CLI (`user.py`)
+		- `pip install -r requirements_webserver.txt` for webserver (`webserver.py`)
 
 ## Security
 
