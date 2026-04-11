@@ -58,6 +58,17 @@
 .status-red { background-color: var(--sf-indicator-red); }
 .status-orange { background-color: var(--sf-indicator-orange); }
 
+.disclaimer {
+  margin-top: 24px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  color: #5b5b5b;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
 
 /* --------------------- */
 /*  Snippflow Skill Bars */
