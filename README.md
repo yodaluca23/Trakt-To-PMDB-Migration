@@ -37,17 +37,17 @@ Planned features and improvements:
 3. Install dependencies.
 4. Create a `.env` file from `.env.example`.
 
-For the CLI migration flow (`user.py`), install from `requirements.txt`.
-For the web UI (`webserver.py`), install from `requirements_webserver.txt`.
+For the CLI migration flow (`user.py`), install from `requirements_user.txt`.
+For the web UI (`webserver.py`), install from `requirements.txt`.
 
 Example:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements_user.txt
 # or, for webserver usage:
-# pip install -r requirements_webserver.txt
+# pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -123,7 +123,7 @@ From the project root:
 
 ```bash
 source .venv/bin/activate
-pip install -r requirements_webserver.txt
+pip install -r requirements.txt
 fastapi run webserver.py
 ```
 
@@ -173,8 +173,8 @@ Use `debug.py` carefully because it deletes watch history records from The Publi
 - Dependency import errors:
 	- Re-activate your virtual environment.
 	- Reinstall packages with the correct file:
-		- `pip install -r requirements.txt` for CLI (`user.py`)
-		- `pip install -r requirements_webserver.txt` for webserver (`webserver.py`)
+		- `pip install -r requirements_user.txt` for CLI (`user.py`)
+		- `pip install -r requirements.txt` for webserver (`webserver.py`)
 
 ## Security
 
