@@ -80,7 +80,10 @@ def check_pmdb_token(token: str) -> bool:
 
     response = requests.request("GET", url, headers=headers, params=querystring)
 
-    return response.status_code == 200
+    if not (response.status_code >= 200 and response.status_code < 300):
+        log(f"PMDB token validation failed: {response.status_code} - {response.text}", level="error")
+
+    return response.status_code >= 200 and response.status_code < 300
 
 def code_authorize_user() -> dict | None:
     global trakt_api_url, userAgent
