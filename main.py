@@ -1,3 +1,5 @@
+import queue
+
 import requests
 from dotenv import load_dotenv
 import os
@@ -24,10 +26,19 @@ class SyncContext:
     token_data: dict
     trakt_headers: dict
     pmdb_headers: dict
+    event_queue: queue.Queue | None = None
 
     @property
-    def username(self):
+    def username(self) -> str:
         return self.token_data.get("user_info", {}).get("user", {}).get("username")
+    
+def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
+    event_queue = ctx.event_queue if ctx else None
+
+    if event_queue:
+        event_queue.put({"type": "log", "message": message, "level": level})
+    elif os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py":
+        print(f"[{level.upper()}] {message}")
 
 def create_trakt_headers(token_data: dict = None) -> dict:
     headers = {
@@ -40,11 +51,12 @@ def create_trakt_headers(token_data: dict = None) -> dict:
 
     return headers
 
-def build_sync_context(token_data: dict, pmdb_api_key: str) -> SyncContext:
+def build_sync_context(token_data: dict, pmdb_api_key: str, event_queue: queue.Queue = None) -> SyncContext:
     return SyncContext(
         token_data=token_data,
         trakt_headers=create_trakt_headers(token_data),
-        pmdb_headers={"Authorization": "Bearer " + pmdb_api_key}
+        pmdb_headers={"Authorization": "Bearer " + pmdb_api_key},
+        event_queue=event_queue
     )
 
 def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
@@ -52,16 +64,27 @@ def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
     response = session.get(trakt_api_url + "/users/settings", headers=trakt_headers)
     if response.status_code == 200:
         user_info = response.json()
-        print(f"User information retrieved: {user_info.get('user').get('username')}")
+        #log(f"User information retrieved: {user_info.get('user').get('username')}")
         token_data["user_info"] = user_info
         return token_data
     else:
-        print(f"Failed to retrieve user information: {response.status_code} - {response.text}")
+        log(f"Failed to retrieve user information: {response.status_code} - {response.text}", level="error")
         return None
+    
+def check_pmdb_token(token: str) -> bool:
+    global pmdb_api_url
+
+    url = pmdb_api_url + "/external/ratings"
+    querystring = {"tmdb_id":"550","media_type":"movie"}
+    headers = {"Authorization": "Bearer " + token}
+
+    response = requests.request("GET", url, headers=headers, params=querystring)
+
+    return response.status_code == 200
 
 def code_authorize_user() -> dict | None:
     global trakt_api_url, userAgent
-    print("Authorizing user...")
+    log("Authorizing user...")
 
     client_id = os.getenv("trakt_client")
     client_secret = os.getenv("trakt_secret")
@@ -76,7 +99,7 @@ def code_authorize_user() -> dict | None:
     interval = response.json().get("interval")
 
     open_new_tab(verification_url + "?code=" + user_code)
-    print(f"If the page doesn't open automatically, please visit {verification_url} and enter the code: {user_code}")
+    log(f"If the page doesn't open automatically, please visit {verification_url} and enter the code: {user_code}")
 
     while True:
         sleep(interval)
@@ -94,20 +117,20 @@ def code_authorize_user() -> dict | None:
 
         if response.status_code == 200:
             json_response = response.json()
-            print("User authorized successfully!")
+            log("User authorized successfully!")
 
             trakt_auth_headers = create_trakt_headers(json_response)
             user_data = add_user_information(json_response, trakt_auth_headers)
 
             return user_data
         elif response.status_code == 400:
-            print("Waiting for user authorization...")
+            log("Waiting for user authorization...")
         else:
-            print(f"Error: {response.status_code} - {response.text}")
+            log(f"Error: {response.status_code} - {response.text}", level="error")
             break
 
 def fetch_watchlist(ctx: SyncContext) -> list | None:
-    print("Fetching watchlist...")
+    log("Fetching watchlist...")
 
     url = trakt_api_url + f"/users/{ctx.username}/watchlist/all/added/asc"
 
@@ -115,11 +138,14 @@ def fetch_watchlist(ctx: SyncContext) -> list | None:
 
     if response.status_code == 200:
         watchlist = response.json()
-        print(f"Watchlist fetched successfully. Total items: {len(watchlist)}")
+        log(f"Watchlist fetched successfully. Total items: {len(watchlist)}", ctx=ctx)
         return watchlist
+    else:
+        log(f"Failed to fetch watchlist: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return []
 
 def get_pmdb_watchlist_id(ctx: SyncContext) -> str | None:
-    print("Retrieving PMDB watchlist ID...")
+    log("Retrieving PMDB watchlist ID...", ctx=ctx)
     url = pmdb_api_url + "/external/lists"
 
     response = session.get(url, headers=ctx.pmdb_headers)
@@ -128,9 +154,9 @@ def get_pmdb_watchlist_id(ctx: SyncContext) -> str | None:
         lists = response.json()
         for watchlist in lists.get("items", [{}]):
             if watchlist.get("type") == "watchlist":
-                print(f"Found existing PMDB watchlist with ID: {watchlist.get('id')}")
+                log(f"Found existing PMDB watchlist with ID: {watchlist.get('id')}", ctx=ctx)
                 return watchlist.get("id")
-        print("No existing PMDB watchlist found. A new one will be created.")
+        log("No existing PMDB watchlist found. A new one will be created.", ctx=ctx)
 
         url = pmdb_api_url + "/external/lists"
         body = {
@@ -141,10 +167,10 @@ def get_pmdb_watchlist_id(ctx: SyncContext) -> str | None:
         response = session.post(url, headers=ctx.pmdb_headers, json=body)
         if response.status_code >= 200 and response.status_code < 300 and response.json().get("success") and response.json().get("item").get("id"):
             new_watchlist = response.json()
-            print(f"New PMDB watchlist created with ID: {new_watchlist.get('item').get('id')}")
+            log(f"New PMDB watchlist created with ID: {new_watchlist.get('item').get('id')}", ctx=ctx)
             return new_watchlist.get("item").get("id")
         else:
-            print(f"Failed to create PMDB watchlist: {response.status_code} - {response.text}")
+            log(f"Failed to create PMDB watchlist: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return None
 
 def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict) -> bool:
@@ -170,14 +196,14 @@ def add_to_pmdb_list(ctx: SyncContext, pmdb_list_id: str, item: dict) -> bool:
 
     response = session.post(url, headers=ctx.pmdb_headers, json=body)
     if response.status_code >= 200 and response.status_code < 300 and response.json().get("success"):
-        print(f"Added '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist.")
+        log(f"Added '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist.", level="verbose", ctx=ctx)
         return True
     else:
-        print(f"Failed to add '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist: {response.status_code} - {response.text}")
+        log(f"Failed to add '{item.get('movie', item.get('show', {})).get('title')}' to PMDB watchlist: {response.status_code} - {response.text}", level="error", ctx=ctx)
     return False
 
 def sync_watchlist(ctx: SyncContext) -> bool:
-    print("Syncing watchlist...")
+    log("Syncing watchlist...", ctx=ctx)
     watchlist = fetch_watchlist(ctx)
     pmdb_watchlist_id = get_pmdb_watchlist_id(ctx)
 
@@ -190,22 +216,22 @@ def sync_watchlist(ctx: SyncContext) -> bool:
             all_success = False
 
     if all_success:
-        print("Watchlist synced successfully!")
+        log("Watchlist synced successfully!", ctx=ctx)
     else:
-        print("Watchlist synced with some errors. Please check the logs for details.")
+        log("Watchlist synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
 
 def fetch_trakt_lists(ctx: SyncContext) -> list | None:
-    print("Fetching Trakt lists...")
+    log("Fetching Trakt lists...", ctx=ctx)
     url = trakt_api_url + f"/users/{ctx.username}/lists"
 
     response = session.get(url, headers=ctx.trakt_headers)
 
     if response.status_code == 200:
         lists = response.json()
-        print(f"Trakt lists fetched successfully. Total lists: {len(lists)}")
+        log(f"Trakt lists fetched successfully. Total lists: {len(lists)}", ctx=ctx)
         return lists
     else:
-        print(f"Failed to fetch Trakt lists: {response.status_code} - {response.text}")
+        log(f"Failed to fetch Trakt lists: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return []
 
 def fetch_trakt_list(ctx: SyncContext, trakt_list: dict) -> list | None:
@@ -215,11 +241,11 @@ def fetch_trakt_list(ctx: SyncContext, trakt_list: dict) -> list | None:
     if response.status_code == 200:
         return response.json()
     else:
-        print(f"Failed to fetch Trakt list: {response.status_code} - {response.text}")
+        log(f"Failed to fetch Trakt list: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return []
 
 def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list) -> bool:
-    print(f"Adding list '{trakt_list.get('name')}' to PMDB...")
+    log(f"Adding list '{trakt_list.get('name')}' to PMDB...", level="verbose", ctx=ctx)
 
     url = pmdb_api_url + "/external/lists"
     body = {
@@ -240,14 +266,14 @@ def add_list_to_pmdb(ctx: SyncContext, trakt_list: dict, trakt_list_items: list)
             success = add_to_pmdb_list(ctx, pmdb_list_id, item)
             if not success:
                 all_success = False
-                print(f"Failed to add item '{item.get('movie', item.get('show', {})).get('title')}' to PMDB list '{trakt_list.get('name')}'.")
+                log(f"Failed to add item '{item.get('movie', item.get('show', {})).get('title')}' to PMDB list '{trakt_list.get('name')}'.", level="error", ctx=ctx)
 
         if not all_success:
-            print(f"List '{trakt_list.get('name')}' added to PMDB with some errors. Please check the logs for details.")
+            log(f"List '{trakt_list.get('name')}' added to PMDB with some errors. Please check the logs for details.", level="error", ctx=ctx)
 
         return all_success
     else:
-        print(f"Failed to create PMDB list '{trakt_list.get('name')}': {response.status_code} - {response.text}")
+        log(f"Failed to create PMDB list '{trakt_list.get('name')}': {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
 def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
@@ -255,7 +281,7 @@ def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
 
     #sync_all = input("Do you want to sync all lists? (y/n): ").lower().replace(" ", "") == "y"
     if sync_all:
-        print("Syncing all lists...")
+        log("Syncing all lists...", ctx=ctx)
 
     all_success = True
 
@@ -263,20 +289,20 @@ def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
         if not sync_all:
             sync_list = input(f"Do you want to sync the list '{trakt_list.get('name')}' (https://trakt.tv/users/{ctx.username}/lists/{trakt_list.get('ids').get('trakt')})? (y/n): ").lower().replace(" ", "") == "y"
             if not sync_list:
-                print(f"Skipping list '{trakt_list.get('name')}'...")
+                log(f"Skipping list '{trakt_list.get('name')}'...", ctx=ctx)
                 continue
 
-        print(f"Syncing list '{trakt_list.get('name')}'...")
+        log(f"Syncing list '{trakt_list.get('name')}'...", ctx=ctx)
 
         trakt_list_items = fetch_trakt_list(ctx, trakt_list)
 
         success = add_list_to_pmdb(ctx, trakt_list, trakt_list_items)
 
         if success:
-            print(f"List '{trakt_list.get('name')}' synced successfully!")
+            log(f"List '{trakt_list.get('name')}' synced successfully!", ctx=ctx)
         else:
             all_success = False
-            print(f"Failed to sync list '{trakt_list.get('name')}'. Please check the logs for details.")
+            log(f"Failed to sync list '{trakt_list.get('name')}'. Please check the logs for details.", level="error", ctx=ctx)
 
     return all_success
 
@@ -300,7 +326,7 @@ def submit_watched_timestamp_to_pmdb(ctx: SyncContext, tmdb_id: int, type: str, 
         if response.status_code >= 200 and response.status_code < 300 and response.json().get("success"):
             return True
         else:
-            print(f"Failed to submit watch history for TMDB ID {tmdb_id} to PMDB: {response.status_code} - {response.text}")
+            log(f"Failed to submit watch history for TMDB ID {tmdb_id} to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
             return False
     
 def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
@@ -327,10 +353,10 @@ def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
                 success = submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "movie", watched_at)
                 if not success:
                     all_success = False
-                    print(f"Failed to submit watch history for movie '{movie.get('movie', {}).get('title')}' (TMDB ID: {tmdb_id}) to PMDB.")
+                    log(f"Failed to submit watch history for movie '{movie.get('movie', {}).get('title')}' (TMDB ID: {tmdb_id}) to PMDB.", level="error", ctx=ctx)
             else:
                 all_success = False
-                print(f"No 'watched_at' timestamp found for movie '{movie.get('movie', {}).get('title')}' (TMDB ID: {tmdb_id}). Skipping.")
+                log(f"No 'watched_at' timestamp found for movie '{movie.get('movie', {}).get('title')}' (TMDB ID: {tmdb_id}). Skipping.", level="error", ctx=ctx)
 
         return all_success
     else:
@@ -338,7 +364,7 @@ def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
 
 def sync_movie_watch_history(ctx: SyncContext) -> bool:
 
-    print("Syncing movie watch history...")
+    log("Syncing movie watch history...", ctx=ctx)
 
     url = trakt_api_url + f"/users/{ctx.username}/watched/movies"
     
@@ -356,7 +382,7 @@ def sync_movie_watch_history(ctx: SyncContext) -> bool:
                     movie_watch_times = response.json()
                     movie["history"] = movie_watch_times
                 else:
-                    print(f"Failed to fetch watch history for movie '{movie.get('movie', {}).get('title')}' (Trakt ID: {movie.get('movie', {}).get('ids', {}).get('trakt')}): {response.status_code} - {response.text}")
+                    log(f"Failed to fetch watch history for movie '{movie.get('movie', {}).get('title')}' (Trakt ID: {movie.get('movie', {}).get('ids', {}).get('trakt')}): {response.status_code} - {response.text}", level="error", ctx=ctx)
                     all_success = False
 
             success = submit_history_movie_to_pmdb(ctx, movie)
@@ -365,7 +391,7 @@ def sync_movie_watch_history(ctx: SyncContext) -> bool:
         return all_success
 
     else:
-        print(f"Failed to fetch watched movies: {response.status_code} - {response.text}")
+        log(f"Failed to fetch watched movies: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
     
 def add_show_watch_history(ctx: SyncContext, show: dict) -> dict:
@@ -381,7 +407,7 @@ def add_show_watch_history(ctx: SyncContext, show: dict) -> dict:
                     if response.status_code == 200:
                         season_details = response.json()
                     else:
-                        print(f"Failed to fetch season details for show '{show.get('show', {}).get('title')}' season {season.get('number')}: {response.status_code} - {response.text}")
+                        log(f"Failed to fetch season details for show '{show.get('show', {}).get('title')}' season {season.get('number')}: {response.status_code} - {response.text}", level="error", ctx=ctx)
                         continue
 
                 for detailed_episode in season_details:
@@ -392,7 +418,7 @@ def add_show_watch_history(ctx: SyncContext, show: dict) -> dict:
                             episode_watch_times = response.json()
                             episode["history"] = episode_watch_times
                         else:
-                            print(f"Failed to fetch watch history for episode '{episode.get('title')}' (Trakt ID: {episode.get('ids', {}).get('trakt')}): {response.status_code} - {response.text}")
+                            log(f"Failed to fetch watch history for episode '{episode.get('title')}' (Trakt ID: {episode.get('ids', {}).get('trakt')}): {response.status_code} - {response.text}", level="error", ctx=ctx)
 
     return show
 
@@ -422,20 +448,20 @@ def submit_history_show_to_pmdb(ctx: SyncContext, show: dict) -> bool:
                         success = submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "tv", watched_at, season=season.get("number"), episode=episode.get("number"))
                         if not success:
                             all_success = False
-                            print(f"Failed to submit watch history for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}) to PMDB.")
+                            log(f"Failed to submit watch history for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}) to PMDB.", level="error", ctx=ctx)
                     else:
                         all_success = False
-                        print(f"No 'watched_at' timestamp found for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}). Skipping.")
+                        log(f"No 'watched_at' timestamp found for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}). Skipping.", level="error", ctx=ctx)
             else:
                 success = submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "tv", episode.get("last_watched_at", "1970-01-01T00:00:00.000Z"), season=season.get("number"), episode=episode.get("number"))
                 if not success:
                     all_success = False
-                    print(f"Failed to submit watch history for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}) to PMDB.")
+                    log(f"Failed to submit watch history for episode '{episode.get('title')}' (TMDB ID: {tmdb_id}) to PMDB.", level="error", ctx=ctx)
 
     return all_success
 
 def sync_show_watch_history(ctx: SyncContext) -> bool:
-    print("Syncing show watch history...")
+    log("Syncing show watch history...", ctx=ctx)
 
     url = trakt_api_url + f"/users/{ctx.username}/watched/shows"
 
@@ -452,13 +478,13 @@ def sync_show_watch_history(ctx: SyncContext) -> bool:
                 all_success = False
         
         if all_success:
-            print("Show watch history synced successfully!")
+            log("Show watch history synced successfully!", ctx=ctx)
         else:
-            print("Show watch history synced with some errors. Please check the logs for details.")
+            log("Show watch history synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
 
         return all_success
     else:
-        print(f"Failed to fetch watched shows: {response.status_code} - {response.text}")
+        log(f"Failed to fetch watched shows: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
     
 def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
@@ -492,11 +518,11 @@ def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
         return True
     else:
         media_label = "Movie" if item_type == "movie" else "Show"
-        print(f"Failed to submit resume point for {media_label} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}")
+        log(f"Failed to submit resume point for {media_label} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
 def sync_show_resume_points(ctx: SyncContext) -> bool:
-    print("Syncing show resume points...")
+    log("Syncing show resume points...", ctx=ctx)
 
     url = trakt_api_url + "/sync/playback/episodes"
     response = session.get(url, headers=ctx.trakt_headers)
@@ -512,17 +538,17 @@ def sync_show_resume_points(ctx: SyncContext) -> bool:
                 all_success = False
 
         if all_success:
-            print("Show resume points synced successfully!")
+            log("Show resume points synced successfully!", ctx=ctx)
         else:
-            print("Show resume points synced with some errors. Please check the logs for details.")
-        
+            log("Show resume points synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
+
         return all_success
     else:
-        print(f"Failed to fetch show resume points: {response.status_code} - {response.text}")
+        log(f"Failed to fetch show resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
 def sync_movie_resume_points(ctx: SyncContext) -> bool:
-    print("Syncing movie resume points...")
+    log("Syncing movie resume points...", ctx=ctx)
 
     url = trakt_api_url + "/sync/playback/movies"
     response = session.get(url, headers=ctx.trakt_headers)
@@ -538,11 +564,11 @@ def sync_movie_resume_points(ctx: SyncContext) -> bool:
                 all_success = False
 
         if all_success:
-            print("Movie resume points synced successfully!")
+            log("Movie resume points synced successfully!", ctx=ctx)
         else:
-            print("Movie resume points synced with some errors. Please check the logs for details.")
+            log("Movie resume points synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
 
         return all_success
     else:
-        print(f"Failed to fetch movie resume points: {response.status_code} - {response.text}")
+        log(f"Failed to fetch movie resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False

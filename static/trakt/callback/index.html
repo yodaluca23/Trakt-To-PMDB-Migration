@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trakt Authorizing</title>
+</head>
+<body>
+    <h1>Trakt Authorization In Progress</h1>
+    <p id="status">Completing authentication...</p>
+    <script>
+
+        // Extract the code from the "code" query parameter
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+
+        if (code) {
+
+            // Make a post request to the server with the code
+            fetch("/trakt/auth", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${code}`
+                }
+            })
+                .then(async response => {
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        throw new Error(data.details || data.error || "Authentication failed");
+                    }
+
+                    console.log("Authorization successful:", data);
+
+                    document.getElementById("status").innerText = "Authentication successful. Redirecting...";
+                    window.location.href = "/";
+                })
+                .catch(error => {
+                    console.error("Authorization failed:", error);
+                    document.getElementById("status").innerText = `Authentication failed: ${error.message}`;
+                });
+        } else {
+            console.error("No code found in the URL hash.");
+            document.getElementById("status").innerText = "No authorization code found in callback URL.";
+        }
+    </script>
+</body>
+</html>

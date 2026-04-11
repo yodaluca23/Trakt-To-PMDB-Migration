@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trakt Migration</title>
+    <link rel="stylesheet" href="/main.css" />
+</head>
+
+<body>
+    <h1>Trakt Migration</h1>
+    <p class="sf-indicator">
+        <span class="trakt-status status-dot status-red"></span>
+        <span class="status-text">Trakt</span>
+    </p>
+
+    <p class="sf-indicator">
+        <span class="pmdb-status status-dot status-red"></span>
+        <span class="status-text">PublicMetaDb</span>
+    </p>
+    <p>Welcome to the Trakt to PublicMetaDb migration website!</p>
+
+    <script language="JavaScript">
+        function toggle(source) {
+            checkboxes = document.getElementsByName("sync_options");
+            for (var checkbox in checkboxes)
+                checkboxes[checkbox].checked = source.checked;
+        }
+    </script>
+
+    <form id="sync-form">
+        <input type="checkbox" onClick="toggle(this)" /> Toggle All<br /><br />
+
+        <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true" />
+        <label for="sync_watchlist_choice"> Sync Watchlist</label><br />
+        <input type="checkbox" id="sync_lists_choice" name="sync_options" value="true" />
+        <label for="sync_lists_choice"> Sync All Lists</label><br />
+        <input type="checkbox" id="sync_show_watch_history_choice" name="sync_options" value="true" />
+        <label for="sync_show_watch_history_choice">
+            Sync Show Watch History</label><br />
+        <input type="checkbox" id="sync_movie_watch_history_choice" name="sync_options" value="true" />
+        <label for="sync_movie_watch_history_choice">
+            Sync Movie Watch History</label><br />
+        <input type="checkbox" id="sync_show_resume_points_choice" name="sync_options" value="true" />
+        <label for="sync_show_resume_points_choice">
+            Sync Show Progress/Resume Points</label><br />
+        <input type="checkbox" id="sync_movie_resume_points_choice" name="sync_options" value="true" />
+        <label for="sync_movie_resume_points_choice">
+            Sync Movie Progress/Resume Points</label><br /><br />
+        <input type="button" id="sync-submit" value="Submit" />
+    </form>
+
+    <div class="progress-dots">
+        <p class="sf-indicator">
+            <span class="watchlist-status status-dot status-red"></span>
+            <span class="status-text">Watchlist Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="lists-status status-dot status-red"></span>
+            <span class="status-text">Lists Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="show-history-status status-dot status-red"></span>
+            <span class="status-text">Show Watch History Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="movie-history-status status-dot status-red"></span>
+            <span class="status-text">Movie Watch History Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="show-resume-status status-dot status-red"></span>
+            <span class="status-text">Show Progress/Resume Points Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="movie-resume-status status-dot status-red"></span>
+            <span class="status-text">Movie Progress/Resume Points Migration</span>
+        </p>
+    </div>
+
+    <div class="sf-skill">
+        <div class="loader"></div>
+        <div class="skill-content">
+            <h4 class="skill-title">Migration In Progress</h4>
+            <p>The progress of your current migration job.</p>
+            <div class="skill-bar" style="--bar-width: 0%" data-progress="0%">
+                <span></span>
+            </div>
+        </div>
+    </div><br />
+
+    <button id="view-logs-button">View Migration Logs</button> <button id="download-logs-button">Download Migration Logs</button>
+    <div class="migration-logs" style="display: none;">
+        <h4>Migration Logs</h4>
+        <pre id="migration-logs-content"></pre>
+    </div>
+
+    <script language="JavaScript">
+        const logsButton = document.getElementById("view-logs-button");
+        const logsContainer = document.querySelector(".migration-logs");
+        const logsContent = document.getElementById("migration-logs-content");
+        const downloadLogsButton = document.getElementById("download-logs-button");
+
+        logsButton.addEventListener("click", () => {
+            if (logsContainer.style.display === "none") {
+                const logs = localStorage.getItem("migration_logs") || "No logs available.";
+                logsContent.textContent = logs;
+                logsContainer.style.display = "block";
+                logsButton.textContent = "Hide Migration Logs";
+            } else {
+                logsContainer.style.display = "none";
+                logsButton.textContent = "View Migration Logs";
+            }
+        });
+
+        downloadLogsButton.addEventListener("click", () => {
+            const logs = localStorage.getItem("migration_logs") || "No logs available.";
+
+            if (logs === "No logs available.") {
+                alert("No logs available to download.");
+                return;
+            }
+
+            const blob = new Blob([logs], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `migration_logs_${new Date().toISOString()}.log`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        function mark_all_dots_before(step) {
+            const steps = [
+                "watchlist",
+                "lists",
+                "show-history",
+                "movie-history",
+                "show-resume",
+                "movie-resume",
+            ];
+            const stepIndex = Number(step) - 1;
+
+            if (stepIndex == -1) {
+                // Mark all dots as red and the first dot as orange to indicate the migration has started but no steps have been completed yet.
+                steps.forEach((step) => {
+                    const dot = document.querySelector(`.${step}-status`);
+                    if (dot) {
+                        dot.classList.remove("status-green", "status-orange");
+                        dot.classList.add("status-red");
+                    }
+                });
+                const firstDot = document.querySelector(`.${steps[0]}-status`);
+                if (firstDot) {
+                    firstDot.classList.remove("status-red", "status-green");
+                    firstDot.classList.add("status-orange");
+                }
+                return;
+            }
+
+            if (Number.isNaN(stepIndex) || stepIndex < 0) {
+                return;
+            }
+
+            for (let i = 0; i < steps.length; i += 1) {
+                const dot = document.querySelector(`.${steps[i]}-status`);
+                if (!dot) {
+                    continue;
+                }
+
+                dot.classList.remove("status-red", "status-orange", "status-green");
+
+                if (i <= stepIndex) {
+                    dot.classList.add("status-green");
+                } else if (i === stepIndex + 1) {
+                    dot.classList.add("status-orange");
+                } else {
+                    dot.classList.add("status-red");
+                }
+            }
+        }
+
+        const syncForm = document.getElementById("sync-form");
+        const syncSubmitButton = document.getElementById("sync-submit");
+
+        // Explicitly block native form submit so checked boxes are never appended to the URL.
+        syncForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+        });
+
+        syncSubmitButton.addEventListener("click", () => {
+            // Build an object where each checkbox id maps to its checked state.
+            const syncOptions = Array.from(
+                document.querySelectorAll("input[name='sync_options']"),
+            ).reduce((options, checkbox) => {
+                options[checkbox.id] = checkbox.checked;
+                return options;
+            }, {});
+            fetch("/migrate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(syncOptions),
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.success) {
+                        alert(data.message);
+
+                        if (data.events_url) {
+                            // Store the events URL in local storage so the status page can use it to listen for updates.
+                            localStorage.setItem("events_url", data.events_url);
+                            localStorage.removeItem("migration_logs"); // Clear any existing logs
+                            localStorage.setItem("migration_progress", "0"); // Initialize logs with a starting message
+                            location.reload(); // Reload the page to update the status indicators
+                        }
+                    } else {
+                        alert("Failed to start sync. Please try again.");
+                    }
+                });
+        });
+
+        function mark_form_as_hidden() {
+            const form = document.querySelector("form");
+            if (form) {
+                form.style.display = "none";
+            }
+        }
+
+        // Check if the user is authenticated
+        fetch("/auth/status")
+            .then((response) => response.json())
+            .then((data) => {
+                const pmdbStatusDot = document.querySelector(".pmdb-status");
+                const pmdbStatusText = document.querySelector(
+                    ".pmdb-status + .status-text",
+                );
+                const traktStatusDot = document.querySelector(".trakt-status");
+                const traktStatusText = document.querySelector(
+                    ".trakt-status + .status-text",
+                );
+
+                if (data.pmdb) {
+                    pmdbStatusDot.classList.remove("status-red");
+                    pmdbStatusDot.classList.add("status-green");
+                    pmdbStatusText.innerText = `PublicMetaDb (${data.pmdb_user})`;
+                } else {
+                    pmdbStatusDot.classList.remove("status-green");
+                    pmdbStatusDot.classList.add("status-red");
+                    pmdbStatusText.innerText = "PublicMetaDb (Not Logged In)";
+
+                    mark_form_as_hidden();
+                }
+
+                if (data.trakt) {
+                    traktStatusDot.classList.remove("status-red");
+                    traktStatusDot.classList.add("status-green");
+                    traktStatusText.innerText = `Trakt (${data.trakt_user})`;
+                } else {
+                    traktStatusDot.classList.remove("status-green");
+                    traktStatusDot.classList.add("status-red");
+                    traktStatusText.innerText = "Trakt (Not Logged In)";
+
+                    mark_form_as_hidden();
+                }
+            })
+            .catch((error) => {
+                console.error("Error checking PMDB authentication status:", error);
+            });
+
+        // Add click behavior to Trakt status text
+        const traktStatusTextLink = document.querySelector(
+            ".trakt-status + .status-text",
+        );
+        if (traktStatusTextLink) {
+            traktStatusTextLink.addEventListener("click", () => {
+                fetch("/trakt/auth")
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.url) {
+                            window.location.href = data.url; // Redirect to the authentication URL
+                        } else {
+                            alert("Failed to get authentication URL. Please try again.");
+                        }
+                    });
+            });
+        }
+
+        // Add click behavior to PMDB status text
+        const pmdbStatusTextLink = document.querySelector(
+            ".pmdb-status + .status-text",
+        );
+        if (pmdbStatusTextLink) {
+            pmdbStatusTextLink.addEventListener("click", () => {
+                const apiKey = prompt("Please enter your PublicMetaDb API key:");
+                if (apiKey) {
+                    fetch("/pmdb/auth", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${apiKey}`,
+                        },
+                    })
+                        .then((response) => response.json())
+                        .then((data) => {
+                            if (data.success) {
+                                location.reload(); // Reload the page to update the status
+                            } else {
+                                alert("Failed to save API key. Please try again.");
+                            }
+                        });
+                }
+            });
+        }
+
+        function updateProgressBar(progress) {
+            const progressBar = document.querySelector(".skill-bar");
+            if (progressBar) {
+                progressBar.style.setProperty("--bar-width", `${progress}%`);
+                progressBar.setAttribute("data-progress", progress);
+            }
+        }
+
+        // Track intentional page teardown so refresh/navigation does not trigger error cleanup.
+        let isPageUnloading = false;
+        window.addEventListener("beforeunload", () => {
+            isPageUnloading = true;
+        });
+        window.addEventListener("pagehide", () => {
+            isPageUnloading = true;
+        });
+
+        // Fetch migration event url from local storage and listen for updates
+        const eventsUrl = localStorage.getItem("events_url");
+        if (eventsUrl) {
+            mark_form_as_hidden(); // Hide the form if there's an active migration
+            progress = localStorage.getItem("migration_progress") || "0"; // Get the last known progress or default to 0
+            progress_number = Number(progress);
+            if (Number.isNaN(progress_number) || progress_number < 0) {
+                progress_number = 0;
+            } else if (progress_number > 100) {
+                progress_number = 100;
+            }
+            updateProgressBar(Math.round((progress_number/6) * 100)); // Update the progress bar to the last known progress
+            mark_all_dots_before(progress_number); // Update the status dots based on the last known progress
+            const eventSource = new EventSource(eventsUrl);
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                // Append new logs to the existing logs in local storage
+                if (data) {
+                    const existingLogs = localStorage.getItem("migration_logs") || "";
+                    const updatedLogs = existingLogs + JSON.stringify(data) + "\n";
+                    localStorage.setItem("migration_logs", updatedLogs);
+
+                    if (logsContainer.style.display === "block") {
+                        logsContent.textContent = updatedLogs; // Update logs display if it's currently visible
+                    }
+                }
+
+                if (data.step !== undefined) {
+                    mark_all_dots_before(data.step);
+                    localStorage.setItem("migration_progress", data.step); // Update the last known progress in local storage
+                }
+                if (data.progress) {
+                    // Update the progress bar width based on the progress value (0-100)
+                    updateProgressBar(data.progress);
+                }
+                if (data.type === "complete" || data.status === "completed") {
+                    alert("Migration completed!");
+                    localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                    localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    location.reload(); // Reload the page to reset the form and status indicators
+                }
+                if (data.type === "error" || data.status === "error") {
+                    alert(`Migration had an error: ${data.message}`);
+                }
+                if (data.type === "critical" || data.status === "critical") {
+                    alert(`Critical Error - Migration aborted: ${data.message}`);
+                    localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                    localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    location.reload(); // Reload the page to reset the form and status indicators
+                }
+            };
+            eventSource.onerror = (error) => {
+                if (isPageUnloading) {
+                    eventSource.close();
+                    return;
+                }
+                eventSource.close();
+                console.error("Error with event source:", error);
+                localStorage.setItem("migration_logs", (localStorage.getItem("migration_logs") || "") + "Connection lost. Please refresh the page.\n"); // Log the connection loss in migration logs
+                localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                alert("Connection lost. Please refresh the page.");
+            };
+        } else {
+            // No active migration, ensure the progress bar is reset and hidden
+            const progressBar = document.querySelector(".skill-bar");
+            const progressBox = document.querySelector(".sf-skill");
+            if (progressBar) {
+                progressBar.style.setProperty("--bar-width", "0%");
+                progressBar.setAttribute("data-progress", "0");
+                progressBox.style.display = "none"; // Hide the progress box when not in use
+            }
+
+            const statusDots = document.querySelector(".progress-dots");
+            if (statusDots) {
+                statusDots.style.display = "none"; // Hide the status dots when not in use
+            }
+        }
+    </script>
+</body>
+
+</html>
