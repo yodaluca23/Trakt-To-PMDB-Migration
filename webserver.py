@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime
 from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Cookie, Response
+from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, RedirectResponse
 import base64
@@ -367,7 +367,8 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
 
     existing_jobs = search_running_jobs(pmdb_api_key)
     if existing_jobs:
-        raise HTTPException(status_code=409, detail="A migration job is already running for this PMDB account. Please wait for it to complete before starting a new one.")
+        response.status_code = status.HTTP_409_CONFLICT
+        return {"success": True, "job_id": existing_jobs[0].get("job_id"), "events_url": f"/migrate/{existing_jobs[0].get('job_id')}/events", "message": "A migration job is already running for this PMDB account. Please wait for it to complete before starting a new one."}
     
     try:
         event_queue = queue.Queue()  # Create a new event queue for this job

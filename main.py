@@ -64,7 +64,7 @@ def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
     response = session.get(trakt_api_url + "/users/settings", headers=trakt_headers)
     if response.status_code == 200:
         user_info = response.json()
-        log(f"User information retrieved: {user_info.get('user').get('username')}")
+        #log(f"User information retrieved: {user_info.get('user').get('username')}")
         token_data["user_info"] = user_info
         return token_data
     else:
