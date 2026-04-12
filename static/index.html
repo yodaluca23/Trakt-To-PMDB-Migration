@@ -127,7 +127,7 @@
             "user-profile",
         ]; // List of expected files in the Trakt export ZIP
 
-        function failTraktFileImport(message) {
+        function failTraktFileImport(message, error) {
             alert(message);
             traktFileStatus.classList.remove("status-orange");
             traktFileStatus.classList.remove("status-green");
@@ -135,7 +135,7 @@
             traktFileStatusText.textContent = `Trakt Data File (Invalid File)`;
             localStorage.removeItem("trakt_data_file");
             localStorage.removeItem("trakt_data");
-            console.error(message);
+            console.error(message, error);
         }
 
         if (traktFileStatusText) {
@@ -241,7 +241,7 @@
                                 failTraktFileImport("The ZIP file is empty. Please upload a valid Trakt data export.");
                             }
                         } catch (error) {
-                            failTraktFileImport("Failed to read the ZIP file. Please ensure it's a valid Trakt data export.");
+                            failTraktFileImport("Failed to read the ZIP file. Please ensure it's a valid Trakt data export.", error);
                         } finally {
                             if (zipReader) {
                                 await zipReader.close();
