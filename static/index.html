@@ -444,6 +444,8 @@
             }
             if (!collectedData) {
                 alert("No Trakt data is available. Please upload your Trakt data file again.");
+                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
+                location.reload(); // Reload the page to reset the form and status indicators
                 return;
             }
             syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server

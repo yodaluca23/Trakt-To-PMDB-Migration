@@ -26,11 +26,12 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_requested.set()
     print("Shutdown signal received, waiting for running jobs to complete...")
-    
+
     while True:
         with jobs_lock:
             remaining = len(running_jobs)
         if remaining == 0:
+            print("All migration jobs completed, shutting down.")
             break
         print(f"Shutdown waiting for {remaining} running migration job(s)...")
         await asyncio.sleep(5)  # Wait before checking again
