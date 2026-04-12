@@ -116,6 +116,66 @@
 
     <script language="JavaScript">
         const traktFileStatus = document.querySelector(".trakt-file-status");
+        const TRAKT_DB_NAME = "trakt-migration";
+        const TRAKT_DB_VERSION = 1;
+        const TRAKT_STORE_NAME = "client-state";
+        const TRAKT_DATA_KEY = "trakt_data";
+
+        function openTraktDb() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(TRAKT_DB_NAME, TRAKT_DB_VERSION);
+                request.onupgradeneeded = () => {
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains(TRAKT_STORE_NAME)) {
+                        db.createObjectStore(TRAKT_STORE_NAME);
+                    }
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function setTraktData(data) {
+            const db = await openTraktDb();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(TRAKT_STORE_NAME, "readwrite");
+                const store = transaction.objectStore(TRAKT_STORE_NAME);
+                const request = store.put(data, TRAKT_DATA_KEY);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+                transaction.oncomplete = () => db.close();
+                transaction.onerror = () => db.close();
+                transaction.onabort = () => db.close();
+            });
+        }
+
+        async function getTraktData() {
+            const db = await openTraktDb();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(TRAKT_STORE_NAME, "readonly");
+                const store = transaction.objectStore(TRAKT_STORE_NAME);
+                const request = store.get(TRAKT_DATA_KEY);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error);
+                transaction.oncomplete = () => db.close();
+                transaction.onerror = () => db.close();
+                transaction.onabort = () => db.close();
+            });
+        }
+
+        async function clearTraktData() {
+            const db = await openTraktDb();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(TRAKT_STORE_NAME, "readwrite");
+                const store = transaction.objectStore(TRAKT_STORE_NAME);
+                const request = store.delete(TRAKT_DATA_KEY);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+                transaction.oncomplete = () => db.close();
+                transaction.onerror = () => db.close();
+                transaction.onabort = () => db.close();
+            });
+        }
 
         // Add click behavior to the Trakt file status text to trigger file input when clicked
         const traktFileStatusText = document.querySelector(".trakt-file-status + .status-text");
@@ -135,6 +195,9 @@
             traktFileStatusText.textContent = `Trakt Data File (Invalid File)`;
             localStorage.removeItem("trakt_data_file");
             localStorage.removeItem("trakt_data");
+            clearTraktData().catch((cleanupError) => {
+                console.error("Failed to clear stored Trakt data:", cleanupError);
+            });
             console.error(message, error);
         }
 
@@ -234,14 +297,18 @@
 
                                 collectedData['file_name'] = file.name; // Store the original file name in the collected data for reference
 
-                                localStorage.setItem("trakt_data", JSON.stringify(collectedData)); // Store the collected data in local storage for the migration process to use
-                                console.log("Collected Trakt data stored in local storage:", collectedData);
+                                await setTraktData(collectedData); // Store the collected data for the migration process to use
+                                console.log("Collected Trakt data stored in IndexedDB:", collectedData);
                                 location.reload(); // Reload only after successful processing so form visibility updates correctly
                             } else {
                                 failTraktFileImport("The ZIP file is empty. Please upload a valid Trakt data export.");
                             }
                         } catch (error) {
-                            failTraktFileImport("Failed to read the ZIP file. Please ensure it's a valid Trakt data export.", error);
+                            if (error?.name === "QuotaExceededError") {
+                                failTraktFileImport("Browser storage quota was exceeded while importing Trakt data. Clear this site's stored data and try again.", error);
+                            } else {
+                                failTraktFileImport("Failed to read the ZIP file. Please ensure it's a valid Trakt data export.", error);
+                            }
                         } finally {
                             if (zipReader) {
                                 await zipReader.close();
@@ -354,7 +421,7 @@
             event.preventDefault();
         });
 
-        syncSubmitButton.addEventListener("click", () => {
+        syncSubmitButton.addEventListener("click", async () => {
             // Build an object where each checkbox id maps to its checked state.
             const syncOptions = Array.from(
                 document.querySelectorAll("input[name='sync_options']"),
@@ -362,15 +429,21 @@
                 options[checkbox.id] = checkbox.checked;
                 return options;
             }, {});
-            collectedData = localStorage.getItem("trakt_data");
             try {
-                collectedData = collectedData ? JSON.parse(collectedData) : null;
+                collectedData = await getTraktData();
             } catch (error) {
                 console.error("Error parsing collected Trakt data:", error);
                 localStorage.removeItem("trakt_data"); // Clear the invalid data from local storage
                 localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
+                clearTraktData().catch((cleanupError) => {
+                    console.error("Failed to clear stored Trakt data:", cleanupError);
+                });
                 alert("Failed to parse the collected Trakt data. Please re-upload your Trakt data file and try again.");
                 location.reload(); // Reload the page to reset the form and status indicators
+                return;
+            }
+            if (!collectedData) {
+                alert("No Trakt data is available. Please upload your Trakt data file again.");
                 return;
             }
             syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server
@@ -558,6 +631,9 @@
                     alert("Migration completed!");
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    clearTraktData().catch((cleanupError) => {
+                        console.error("Failed to clear stored Trakt data:", cleanupError);
+                    });
                     location.reload(); // Reload the page to reset the form and status indicators
                 }
                 if (data.type === "error" || data.status === "error") {
@@ -567,6 +643,9 @@
                     alert(`Critical Error - Migration aborted: ${data.message}`);
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    clearTraktData().catch((cleanupError) => {
+                        console.error("Failed to clear stored Trakt data:", cleanupError);
+                    });
                     location.reload(); // Reload the page to reset the form and status indicators
                 }
             };
