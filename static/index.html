@@ -152,7 +152,6 @@
                             if (entries.length) {
                                 console.log("ZIP file entries:", entries.map((entry) => entry.filename));
                                 const blob = await entries[0].getData(new zip.BlobWriter());
-                                const traktDataFileUrl = URL.createObjectURL(blob);
                                 localStorage.setItem("trakt_data_file", file.name); // Store the file name in local storage for display
                                 traktFileStatus.classList.remove("status-orange");
                                 traktFileStatus.classList.add("status-green");
@@ -202,6 +201,10 @@
                                             collectedData[normalName] = JSON.parse(entryText);
                                         }
                                     }
+                                }
+
+                                if (!collectedData['lists-lists']) {
+                                    collectedData['lists-lists'] = []; // Ensure lists-lists is at least an empty array if not present, to avoid errors later
                                 }
 
                                 for (const list in collectedData['lists-lists']) {
@@ -351,7 +354,18 @@
                 options[checkbox.id] = checkbox.checked;
                 return options;
             }, {});
-            syncOptions["trakt_data"] = localStorage.getItem("trakt_data"); // Include the collected Trakt data from local storage in the sync options sent to the server
+            collectedData = localStorage.getItem("trakt_data");
+            try {
+                collectedData = collectedData ? JSON.parse(collectedData) : null;
+            } catch (error) {
+                console.error("Error parsing collected Trakt data:", error);
+                localStorage.removeItem("trakt_data"); // Clear the invalid data from local storage
+                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
+                alert("Failed to parse the collected Trakt data. Please re-upload your Trakt data file and try again.");
+                location.reload(); // Reload the page to reset the form and status indicators
+                return;
+            }
+            syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server
 
             fetch("/migrate", {
                 method: "POST",

@@ -613,7 +613,7 @@ def sync_show_resume_points(ctx: SyncContext) -> bool:
     url = trakt_api_url + "/sync/playback/episodes"
     response = session.get(url, headers=ctx.trakt_headers) if not progress_data else None
 
-    if response.status_code == 200 if response else True:
+    if response is None or response.status_code == 200:
         progress_data = response.json() if progress_data == [] else progress_data
 
         all_success = True
@@ -646,7 +646,7 @@ def sync_movie_resume_points(ctx: SyncContext) -> bool:
     url = trakt_api_url + "/sync/playback/movies"
     response = session.get(url, headers=ctx.trakt_headers) if not progress_data else None
 
-    if response.status_code == 200 if response else True:
+    if response is None or response.status_code == 200:
         progress_data = response.json() if progress_data == [] else progress_data
 
         all_success = True
