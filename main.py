@@ -27,6 +27,7 @@ class SyncContext:
     token_data: dict
     trakt_headers: dict
     pmdb_headers: dict
+    trakt_data: dict
     event_queue: queue.Queue | None = None
 
     @property
