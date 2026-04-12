@@ -151,18 +151,17 @@
                         traktFileStatus.classList.add("status-orange");
                         traktFileStatusText.textContent = `Processing Trakt Data File (${file.name})`;
 
+                        let zipReader;
                         try {
-                            const zipReader = new zip.ZipReader(new zip.BlobReader(file));
+                            zipReader = new zip.ZipReader(new zip.BlobReader(file));
                             const entries = await zipReader.getEntries();
 
                             if (entries.length) {
                                 console.log("ZIP file entries:", entries.map((entry) => entry.filename));
-                                const blob = await entries[0].getData(new zip.BlobWriter());
                                 localStorage.setItem("trakt_data_file", file.name); // Store the file name in local storage for display
                                 traktFileStatus.classList.remove("status-orange");
                                 traktFileStatus.classList.add("status-green");
                                 traktFileStatusText.textContent = `Trakt Data File (${file.name})`;
-                                await zipReader.close();
                                 var collectedData = {};
 
                                 // Parse each entry in the ZIP file and store its content in local storage
@@ -218,7 +217,7 @@
                                     console.log(`Processing list: ${collectedData['lists-lists'][list]['name']} with ID: ${listId}`);
                                     for (const entry of entries) {
                                         if (!entry.directory) {
-                                            if (entry.filename.startsWith(`lists-list-${listId}`)) {
+                                            if (entry.filename.startsWith(`lists-list-${listId}`) && entry.filename.endsWith(".json")) {
                                                 const entryBlob = await entry.getData(new zip.BlobWriter());
                                                 const entryText = await entryBlob.text();
                                                 try {
@@ -239,11 +238,14 @@
                                 console.log("Collected Trakt data stored in local storage:", collectedData);
                                 location.reload(); // Reload only after successful processing so form visibility updates correctly
                             } else {
-                                await zipReader.close();
                                 failTraktFileImport("The ZIP file is empty. Please upload a valid Trakt data export.");
                             }
                         } catch (error) {
                             failTraktFileImport("Failed to read the ZIP file. Please ensure it's a valid Trakt data export.");
+                        } finally {
+                            if (zipReader) {
+                                await zipReader.close();
+                            }
                         }
                     }
                 };
