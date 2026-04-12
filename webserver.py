@@ -73,6 +73,7 @@ class sync_options(BaseModel):
     sync_show_resume_points_choice: bool = False
     sync_show_watch_history_choice: bool = False
     sync_watchlist_choice: bool = False
+    trakt_data: dict
 
     model_config = {
         "json_schema_extra": {
@@ -83,7 +84,15 @@ class sync_options(BaseModel):
                     "sync_movie_watch_history_choice": False,
                     "sync_show_resume_points_choice": True,
                     "sync_show_watch_history_choice": True,
-                    "sync_watchlist_choice": False
+                    "sync_watchlist_choice": False,
+                    "trakt_data": {
+                        "lists-lists": [],
+                        "watched-history": [],
+                        "lists-watchlist": [],
+                        "lists-lists": [],
+                        "watched-playback": [],
+                        "user-profile": []
+                    }
                 }
             ]
         }
@@ -377,7 +386,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
     
     try:
         event_queue = queue.Queue()  # Create a new event queue for this job
-        sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue)
+        sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue, sync_options.trakt_data)  # Build the sync context with the provided options and event queue
 
         sync_options_data = sync_options.model_dump()
         job_id, event_queue, thread = create_sync_job(sync_context, sync_options_data, event_queue)  # Create the sync job and get the event queue
