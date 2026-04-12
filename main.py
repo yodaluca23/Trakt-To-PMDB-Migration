@@ -39,8 +39,8 @@ def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
 
     if event_queue and level.lower() != "verbose":
         event_queue.put({"type": "log", "message": message, "level": level})
-    elif (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py") or os.getenv("log_to_console", "true").lower() == "true":
-        print(f"[{level.upper()}] {message}")
+    if (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py") or os.getenv("log_to_console", "true").lower() == "true":
+        print(f"{ctx.username}: [{level.upper()}] {message}")
 
 def create_trakt_headers(token_data: dict = None) -> dict:
     headers = {
@@ -328,7 +328,7 @@ def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
 
         log(f"Syncing list '{trakt_list.get('name')}'...", ctx=ctx)
 
-        trakt_list_items = fetch_trakt_list(ctx, trakt_list)
+        trakt_list_items = trakt_list.get("items") or fetch_trakt_list(ctx, trakt_list)
 
         success = add_list_to_pmdb(ctx, trakt_list, trakt_list_items)
 
@@ -508,6 +508,7 @@ def submit_exported_history_to_pmdb(ctx: SyncContext, media_type: str, history: 
 
     for item in history:
         if item.get("type") == media_type:
+            log(f"Processing {media_type} '{item.get('movie', item.get('show', {})).get('title')}' with watch timestamp '{item.get('watched_at')}'", ctx=ctx, level="verbose")
             watched_at = item.get("watched_at", "1970-01-01T00:00:00.000Z")
             tmdb_id = item.get("movie", item.get("show", {})).get("ids", {}).get("tmdb")
 
