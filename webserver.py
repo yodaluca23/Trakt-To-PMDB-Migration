@@ -25,6 +25,8 @@ shutdown_requested = threading.Event()
 async def lifespan(app: FastAPI):
     yield
     shutdown_requested.set()
+    print("Shutdown signal received, waiting for running jobs to complete...")
+    
     while True:
         with jobs_lock:
             remaining = len(running_jobs)

@@ -36,11 +36,12 @@ class SyncContext:
     
 def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
     event_queue = ctx.event_queue if ctx else None
+    username = ctx.username if ctx and ctx.username else "SYSTEM"
 
     if event_queue and level.lower() != "verbose":
         event_queue.put({"type": "log", "message": message, "level": level})
     if (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py") or os.getenv("log_to_console", "true").lower() == "true":
-        print(f"{ctx.username}: [{level.upper()}] {message}")
+        print(f"{username}: [{level.upper()}] {message}")
 
 def create_trakt_headers(token_data: dict = None) -> dict:
     headers = {
@@ -144,10 +145,10 @@ def parse_listed_at(value: str) -> datetime.datetime:
         return datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
 def fetch_watchlist(ctx: SyncContext) -> list | None:
-    log("Fetching watchlist...")
+    log("Fetching watchlist...", ctx=ctx)
 
     if ctx.trakt_data and ctx.trakt_data.get("lists-watchlist") is not None:
-        log("Using watchlist from provided trakt_data.")
+        log("Using watchlist from provided trakt_data.", ctx=ctx)
         watchlist = ctx.trakt_data.get("lists-watchlist")
 
         # Sort by converting 'listed_at' date to a datetime object in ascending order to maintain consistency with how items are added to PMDB
