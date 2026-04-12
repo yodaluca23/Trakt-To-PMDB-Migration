@@ -86,7 +86,6 @@ class sync_options(BaseModel):
                     "sync_show_watch_history_choice": True,
                     "sync_watchlist_choice": False,
                     "trakt_data": {
-                        "lists-lists": [],
                         "watched-history": [],
                         "lists-watchlist": [],
                         "lists-lists": [],

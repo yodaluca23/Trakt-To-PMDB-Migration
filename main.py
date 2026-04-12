@@ -396,14 +396,14 @@ def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
         return submit_watched_timestamp_to_pmdb(ctx, tmdb_id, "movie", movie.get("last_watched_at", "1970-01-01T00:00:00.000Z"))
 
 def sync_movie_watch_history(ctx: SyncContext) -> bool:
+    log("Syncing movie watch history...", ctx=ctx)
 
     if ctx.trakt_data and ctx.trakt_data.get("watched-history") is not None:
         log("Using watched movies from provided trakt_data.", ctx=ctx)
         watch_history = ctx.trakt_data.get("watched-history")
-        submit_exported_history_to_pmdb(ctx, "movie", watch_history)
-
-    log("Syncing movie watch history...", ctx=ctx)
-
+        success = submit_exported_history_to_pmdb(ctx, "movie", watch_history)
+        return success
+    
     url = trakt_api_url + f"/users/{ctx.username}/watched/movies"
     
     response = session.request("GET", url, headers=ctx.trakt_headers)
