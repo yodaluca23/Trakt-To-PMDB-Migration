@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime
 from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status
+from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, RedirectResponse
 import base64
@@ -402,7 +402,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to start migration job")
 
-def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
+def stream_sync_job(job_id: str, pmdb_api_key: str, request: Request) -> StreamingResponse:
     job = get_running_job(job_id)
     if job:
         if job["pmdb_api_key"] != pmdb_api_key:
@@ -412,20 +412,27 @@ def stream_sync_job(job_id: str, pmdb_api_key: str) -> StreamingResponse:
 
     event_queue = job["event_queue"]
 
-    def event_generator() -> any:
+    async def event_generator() -> any:
+        last_event_time = datetime.now()
         while True:
+            if await request.is_disconnected():
+                break
             try:
-                event = event_queue.get(timeout=1)  # Wait for an event with a timeout to allow checking for thread completion
+                event = await asyncio.to_thread(event_queue.get, True, 1)  # Wait for an event with a timeout to allow checking for disconnects
+                last_event_time = datetime.now()
                 yield f"data: {json.dumps(event)}\n\n"
-                if event.get("type") == "complete":
-                    break  # Stop streaming after completion
+                event_type = event.get("type")
+                if event_type in ["complete", "critical"]:
+                    break  # Stop streaming after terminal events
             except queue.Empty:
-                continue  # No event, check again
+                if (datetime.now() - last_event_time).total_seconds() > 15:  # Send a keep-alive comment every 30 seconds if no events have been sent
+                    yield ": keep-alive\n\n"
+                    last_event_time = datetime.now()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/migrate/{job_id}/events")
-def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)) -> StreamingResponse:
+def migrate_job_events(job_id: str, request: Request, pmdb_auth: str | None = Cookie(default=None)) -> StreamingResponse:
     pmdb_api_key = None
 
     if pmdb_auth:
@@ -436,7 +443,7 @@ def migrate_job_events(job_id: str, pmdb_auth: str | None = Cookie(default=None)
     else:
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
     
-    return stream_sync_job(job_id, pmdb_api_key)
+    return stream_sync_job(job_id, pmdb_api_key, request)
 
 @app.get(os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") if os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") != "/trakt/callback" else "/trakt/callback_fallback")
 def trakt_callback_fallback(code: str | None = None) -> RedirectResponse:
