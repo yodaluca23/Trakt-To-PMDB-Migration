@@ -38,9 +38,18 @@ def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
     event_queue = ctx.event_queue if ctx else None
     username = ctx.username if ctx and ctx.username else "SYSTEM"
 
+    def print_to_console():
+        print(f"{username}: [{level.upper()}] {message}")
+
+
     if event_queue and level.lower() != "verbose":
         event_queue.put({"type": "log", "message": message, "level": level})
-    if (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py") or os.getenv("log_to_console", "true").lower() == "true":
+
+    if os.getenv("log_to_console", "false").lower() == "true" and level.lower() != "verbose":
+        print_to_console()
+    elif os.getenv("log_to_console", "false").lower() == "verbose":
+        print_to_console()
+    elif (os.getenv("domain", "").replace(" ", "") == "" or os.getenv("domain", "").lower() == "required_if_using_as_a_webserver_with_webserver.py"):
         print(f"{username}: [{level.upper()}] {message}")
 
 def create_trakt_headers(token_data: dict = None) -> dict:
