@@ -29,7 +29,8 @@
     </p>
     <p>Welcome to the Trakt to PublicMetaDb migration website!</p>
     <p>Start by clicking each of the sign in buttons to authorize the application.</p>
-    <p>Get your Trakt data file from <a href="https://app.trakt.tv/settings/data" target="_blank">Trakt Settings</a> and upload it above.</p>
+    <p>Get your Trakt data file from <a href="https://app.trakt.tv/settings/data" target="_blank">Trakt Settings</a> and
+        upload it above.</p>
 
     <script language="JavaScript">
         function toggle(source) {
@@ -535,17 +536,35 @@
         const traktStatusTextLink = document.querySelector(
             ".trakt-status + .status-text",
         );
+
+        let server_data = null;
+        fetch("/status")
+            .then((response) => response.json())
+            .then((data) => {
+                server_data = data;
+                if (data.version) {
+                    console.log(`Server version: ${data.version}`);
+                }
+                if (data.server_uptime_seconds !== undefined) {
+                    console.log(`Server uptime (seconds): ${data.server_uptime_seconds}`);
+                    if (data.server_uptime_seconds < 300) {
+                        alert(`The server was started ${Math.round(data.server_uptime_seconds / 60)} minutes ago. If you recently requested a migration please do not request another. The current migration is likely still processing. Progress updates may be delayed until the current migration is complete. You can always check "publicmetadb.com/my-progress" for live updates on your migration progress.`);
+                    }
+                }
+
+
+            })
+            .catch((error) => {
+                console.error("Failed to fetch server status:", error);
+                alert("Failed to contact the server. Please try again.");
+            });
         if (traktStatusTextLink) {
             traktStatusTextLink.addEventListener("click", () => {
-                fetch("/trakt/auth")
-                    .then((response) => response.json())
-                    .then((data) => {
-                        if (data.url) {
-                            window.location.href = data.url; // Redirect to the authentication URL
-                        } else {
-                            alert("Failed to get authentication URL. Please try again.");
-                        }
-                    });
+                if (server_data && server_data.trakt_url) {
+                    window.location.href = server_data.trakt_url; // Redirect to the authentication URL
+                } else {
+                    alert("Failed to get authentication URL. Please try again.");
+                }
             });
         }
 

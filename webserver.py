@@ -6,7 +6,7 @@ import queue
 import threading
 import traceback
 from datetime import datetime
-from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url
+from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url, version
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status, Request
 from fastapi.staticfiles import StaticFiles
@@ -41,6 +41,7 @@ load_dotenv()
 session = requests.Session()
 running_jobs = []  # List to keep track of running jobs and their event queues
 jobs_lock = threading.Lock()  # Lock to synchronize access to the running_jobs list
+server_start_time = datetime.now()
 
 def get_running_job(job_id: str) -> dict | None:
     global running_jobs
@@ -95,6 +96,27 @@ class sync_options(BaseModel):
                         "watched-playback": [],
                         "user-profile": []
                     }
+                }
+            ]
+        }
+    }
+
+class server_status(BaseModel):
+    status: str
+    version: str
+    server_time: str
+    server_uptime_seconds: float
+    trakt_url: str
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "ok",
+                    "version": "1.0.0",
+                    "server_time": "2026-04-13T13:19:44.808877",
+                    "server_uptime_seconds": 272.221156,
+                    "trakt_url": "https://api.trakt.tv/oauth/authorize"
                 }
             ]
         }
@@ -170,16 +192,25 @@ def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Respons
 
         return response, False, None
 
-@app.get("/trakt/auth")
-def generate_trakt_authorization_url() -> dict:
+@app.get("/status")
+def get_server_status() -> server_status:
     global trakt_api_url, userAgent
+
+    returnDict = {
+        "status": "ok",
+        "version": version,
+        "server_time": datetime.now().isoformat(),
+        "server_uptime_seconds": (datetime.now() - server_start_time).total_seconds()
+    }
 
     client_id = os.getenv("trakt_client")
     redirect_uri = os.getenv("domain", "http://127.0.0.1:8000") + os.getenv("trakt_redirect_uri", "/trakt/callback")
     
     user_url = f"{trakt_api_url}/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}"
+    returnDict["trakt_url"] = user_url
+    status_return = server_status(**returnDict)
 
-    return {"url": user_url}
+    return status_return
 
 @app.post("/trakt/auth")
 def authenticate_trakt_user(response: Response, Authorization: str = Header(default=None)) -> dict:
