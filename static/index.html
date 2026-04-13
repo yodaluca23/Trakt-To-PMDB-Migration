@@ -626,6 +626,7 @@
             updateProgressBar(Math.round((progress_number / 6) * 100)); // Update the progress bar to the last known progress
             mark_all_dots_before(progress_number); // Update the status dots based on the last known progress
             const eventSource = new EventSource(eventsUrl);
+            let migrationEnded = false;
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
@@ -649,18 +650,19 @@
                     updateProgressBar(data.progress);
                 }
                 if (data.type === "complete" || data.status === "completed") {
+                    migrationEnded = true;
+                    eventSource.close();
                     alert("Migration completed!");
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
-                    clearTraktData().catch((cleanupError) => {
-                        console.error("Failed to clear stored Trakt data:", cleanupError);
-                    });
                     location.reload(); // Reload the page to reset the form and status indicators
                 }
                 if (data.type === "error" || data.status === "error") {
                     alert(`Migration had an error: ${data.message}`);
                 }
                 if (data.type === "critical" || data.status === "critical") {
+                    migrationEnded = true;
+                    eventSource.close();
                     alert(`Critical Error - Migration aborted: ${data.message}`);
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
@@ -671,6 +673,12 @@
                 }
             };
             eventSource.onerror = (error) => {
+                if (migrationEnded) {
+                    eventSource.close();
+                    localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    localStorage.removeItem("events_url"); // Clear the events URL from local storage
+                    return;
+                }
                 if (isPageUnloading) {
                     eventSource.close();
                     return;
