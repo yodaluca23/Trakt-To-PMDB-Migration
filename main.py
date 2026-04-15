@@ -578,6 +578,53 @@ def sync_show_watch_history(ctx: SyncContext) -> bool:
         log(f"Failed to fetch watched shows: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
     
+def submit_resume_point_batch_to_pmdb(ctx: SyncContext, batch: list) -> bool:
+
+    submit_list = []        
+
+    for item in batch:
+        item_type = "movie" if item.get("type") == "movie" else "tv"
+        item_spesific = item.get("movie", item.get("show", {}))
+        ids = item_spesific.get("ids", {})
+
+        # Normalize progress percentage to runtime and position in milliseconds for PMDB, since it doesn't support percentage-based resume points.
+        percentage = item.get("progress", 0)
+        runtime_ms = 100 * 10000 # Full 100% complete
+        position_ms = percentage * 10000 # Normalized to account for decimal points
+        position_ms = round(position_ms) # Round to nearest millisecond
+
+        body = {
+            "media_type": item_type,
+            "tmdb_id": ids.get("tmdb"),
+            "id_type": "trakt",
+            "id_value": ids.get("trakt"),
+            "position_ms": position_ms,
+            "runtime_ms": runtime_ms
+        }
+
+        if item_type == "tv":
+            body["season"] = item.get("episode", {}).get("season")
+            body["episode"] = item.get("episode", {}).get("number")
+
+        submit_list.append(body)
+
+    response = session.post(pmdb_api_url + "/external/resume/batch", headers=ctx.pmdb_headers, json={"items": submit_list})
+    if response.status_code >= 200 and response.status_code < 300:
+        data = response.json()
+        summary = data.get("summary", {}) 
+        if summary.get("saved", 0) == len(submit_list):
+            return True
+
+        for result in data.get("results", []):
+            if result.get("status") != "saved":
+                media_label = "Movie" if result.get("media_type") == "movie" else "Show"
+                log(f"Failed to submit resume point for {media_label} with TMDB ID {result.get('tmdb_id')} to PMDB: {result.get('action')}", level="error", ctx=ctx)
+        log(f"Failed to submit resume points for {len(submit_list)} items to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return False
+    else:
+        log(f"Failed to submit resume points batch to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return False
+
 def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
 
     item_type = "movie" if item.get("type") == "movie" else "tv"
@@ -612,68 +659,52 @@ def submit_resume_point_to_pmdb(ctx: SyncContext, item: dict) -> bool:
         log(f"Failed to submit resume point for {media_label} '{item_spesific.get('title')}' (Trakt ID: {ids.get('trakt')}) to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False
 
-def sync_show_resume_points(ctx: SyncContext) -> bool:
-    log("Syncing show resume points...", ctx=ctx)
+def sync_resume_points(ctx: SyncContext, sync_type: str) -> bool:
+    log(f"Syncing {sync_type} resume points...", ctx=ctx)
+    
+    sync_type_singular = "movie" if sync_type == "movies" else "episode"
 
     progress_data = []
     if ctx.trakt_data and ctx.trakt_data.get("watched-playback") is not None:
-        log("Using show resume points from provided trakt_data.", ctx=ctx)
+        log(f"Using {sync_type} resume points from provided trakt_data.", ctx=ctx)
         resume_points = ctx.trakt_data.get("watched-playback")
         sorted_resume_points = sorted(resume_points, key=lambda x: parse_listed_at(x.get("paused_at")), reverse=False)
-        progress_data = [item for item in sorted_resume_points if item.get("type") == "episode"]
+        progress_data = [item for item in sorted_resume_points if item.get("type") == sync_type_singular]
 
-    url = trakt_api_url + "/sync/playback/episodes"
+    url = trakt_api_url + f"/sync/playback/{sync_type}"
     response = session.get(url, headers=ctx.trakt_headers) if not progress_data else None
 
     if response is None or response.status_code == 200:
         progress_data = response.json() if progress_data == [] else progress_data
 
         all_success = True
+
+        batched_data = []
+        batch_size = 50  # Adjust batch size as needed
 
         for show in progress_data:
-            success = submit_resume_point_to_pmdb(ctx, show)
+            batched_data.append(show)
+
+            if len(batched_data) >= batch_size:
+                success = submit_resume_point_batch_to_pmdb(ctx, batched_data)
+                if not success:
+                    all_success = False
+                    log("Failed to submit a batch of resume points to PMDB. Please check the logs for details.", level="error", ctx=ctx)
+                batched_data = []
+
+        # Submit any remaining items that didn't fill a complete batch
+        if batched_data:
+            success = submit_resume_point_batch_to_pmdb(ctx, batched_data)
             if not success:
                 all_success = False
-
+                log("Failed to submit the final batch of resume points to PMDB. Please check the logs for details.", level="error", ctx=ctx)
+            
         if all_success:
-            log("Show resume points synced successfully!", ctx=ctx)
+            log(f"{sync_type.capitalize()} resume points synced successfully!", ctx=ctx)
         else:
-            log("Show resume points synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
+            log(f"{sync_type.capitalize()} resume points synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
 
         return all_success
     else:
-        log(f"Failed to fetch show resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
-        return False
-
-def sync_movie_resume_points(ctx: SyncContext) -> bool:
-    log("Syncing movie resume points...", ctx=ctx)
-
-    progress_data = []
-    if ctx.trakt_data and ctx.trakt_data.get("watched-playback") is not None:
-        log("Using movie resume points from provided trakt_data.", ctx=ctx)
-        resume_points = ctx.trakt_data.get("watched-playback")
-        sorted_resume_points = sorted(resume_points, key=lambda x: parse_listed_at(x.get("paused_at")), reverse=False)
-        progress_data = [item for item in sorted_resume_points if item.get("type") == "movie"]
-
-    url = trakt_api_url + "/sync/playback/movies"
-    response = session.get(url, headers=ctx.trakt_headers) if not progress_data else None
-
-    if response is None or response.status_code == 200:
-        progress_data = response.json() if progress_data == [] else progress_data
-
-        all_success = True
-
-        for movie in progress_data:
-            success = submit_resume_point_to_pmdb(ctx, movie)
-            if not success:
-                all_success = False
-
-        if all_success:
-            log("Movie resume points synced successfully!", ctx=ctx)
-        else:
-            log("Movie resume points synced with some errors. Please check the logs for details.", level="error", ctx=ctx)
-
-        return all_success
-    else:
-        log(f"Failed to fetch movie resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        log(f"Failed to fetch {sync_type} resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
         return False

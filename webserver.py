@@ -6,7 +6,7 @@ import queue
 import threading
 import traceback
 from datetime import datetime
-from main import check_pmdb_token, sync_lists, sync_movie_resume_points, sync_movie_watch_history, sync_show_resume_points, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url, version
+from main import check_pmdb_token, sync_lists, sync_resume_points, sync_movie_watch_history, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url, version
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status, Request
 from fastapi.staticfiles import StaticFiles
@@ -341,11 +341,11 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
         event_queue.put({"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
 
         if sync_options.get("sync_show_resume_points_choice"):
-            sync_show_resume_points(sync_context)
+            sync_resume_points(sync_context, "episodes")
         event_queue.put({"type": "progress", "message": "Finished syncing show resume points", "step": 5, "progress": 83})
             
         if sync_options.get("sync_movie_resume_points_choice"):
-            sync_movie_resume_points(sync_context)
+            sync_resume_points(sync_context, "movies")
 
         event_queue.put({"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
 
