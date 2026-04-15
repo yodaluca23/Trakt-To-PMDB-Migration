@@ -616,10 +616,10 @@ def submit_resume_point_batch_to_pmdb(ctx: SyncContext, batch: list) -> bool:
             return True
 
         for result in data.get("results", []):
-            if result.get("status") != "saved":
+            if result.get("action") != "saved":
                 media_label = "Movie" if result.get("media_type") == "movie" else "Show"
                 log(f"Failed to submit resume point for {media_label} with TMDB ID {result.get('tmdb_id')} to PMDB: {result.get('action')}", level="error", ctx=ctx)
-        log(f"Failed to submit resume points for {len(submit_list)} items to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        log(f"Failed to submit resume points for some of {len(submit_list)} items to PMDB: {response.status_code}. Check the logs for details.", level="error", ctx=ctx)
         return False
     else:
         log(f"Failed to submit resume points batch to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
