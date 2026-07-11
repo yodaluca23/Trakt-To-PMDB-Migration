@@ -43,7 +43,10 @@ def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
 
 
     if event_queue and level.lower() != "verbose":
-        event_queue.put({"type": "log", "message": message, "level": level})
+        try:
+            event_queue.put_nowait({"type": "log", "message": message, "level": level})
+        except queue.Full:
+            pass
 
     if os.getenv("log_to_console", "false").lower() == "true" and level.lower() != "verbose":
         print_to_console()

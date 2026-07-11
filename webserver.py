@@ -43,6 +43,17 @@ running_jobs = []  # List to keep track of running jobs and their event queues
 jobs_lock = threading.Lock()  # Lock to synchronize access to the running_jobs list
 server_start_time = datetime.now()
 
+
+def create_event_queue() -> queue.Queue:
+    return queue.Queue(maxsize=500)
+
+
+def enqueue_event(event_queue: queue.Queue, event: dict) -> None:
+    try:
+        event_queue.put_nowait(event)
+    except queue.Full:
+        pass
+
 def get_running_job(job_id: str) -> dict | None:
     global running_jobs
 
@@ -326,34 +337,34 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
     try:
         if sync_options.get("sync_watchlist_choice"):
             sync_watchlist(sync_context)
-        event_queue.put({"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 17})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 17})
 
         if sync_options.get("sync_lists_choice"):
             sync_lists(sync_context)
-        event_queue.put({"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 33})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 33})
 
         if sync_options.get("sync_show_watch_history_choice"):
             sync_show_watch_history(sync_context)
-        event_queue.put({"type": "progress", "message": "Finished syncing show watch history", "step": 3, "progress": 50})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show watch history", "step": 3, "progress": 50})
 
         if sync_options.get("sync_movie_watch_history_choice"):
             sync_movie_watch_history(sync_context)
-        event_queue.put({"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
 
         if sync_options.get("sync_show_resume_points_choice"):
             sync_resume_points(sync_context, "episodes")
-        event_queue.put({"type": "progress", "message": "Finished syncing show resume points", "step": 5, "progress": 83})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show resume points", "step": 5, "progress": 83})
             
         if sync_options.get("sync_movie_resume_points_choice"):
             sync_resume_points(sync_context, "movies")
 
-        event_queue.put({"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
+        enqueue_event(event_queue, {"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
 
         remove_job(job_id)  # Remove the job from the running jobs list after completion
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()
-        event_queue.put({"type": "critical", "message": f"Migration failed: {str(e)}"})
+        enqueue_event(event_queue, {"type": "critical", "message": f"Migration failed: {str(e)}"})
         remove_job(job_id)  # Remove the job from the running jobs list after completion
 
 def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Queue) -> tuple[str, queue.Queue, threading.Thread]:
@@ -365,14 +376,14 @@ def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Q
 def create_sync_job_dummy() -> tuple[str, queue.Queue, threading.Thread]:
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
     print(f"Created dummy job with ID:\n{job_id}\nJob URL:\n/migrate/{job_id}/events")
-    event_queue = queue.Queue()
+    event_queue = create_event_queue()
     add_job(job_id, event_queue, os.getenv("PMDB_API_KEY"))  # Add the new job to the list of running jobs with a dummy PMDB API key
 
     def dummy_event_generator() -> None:
         for i in range(6):
-            event_queue.put({"type": "progress", "message": f"Dummy progress update {i+1}/6", "step": i+1, "progress": round((i+1)/6 * 100, 0), "complete": True if i == 5 else False})
+            enqueue_event(event_queue, {"type": "progress", "message": f"Dummy progress update {i+1}/6", "step": i+1, "progress": round((i+1)/6 * 100, 0), "complete": True if i == 5 else False})
             sleep(15)  # Simulate time taken for each step of the migration
-        event_queue.put({"type": "complete", "message": "Dummy migration complete"})
+        enqueue_event(event_queue, {"type": "complete", "message": "Dummy migration complete"})
         remove_job(job_id)  # Remove the job from the running jobs list after completion
 
     # Create a thread that simulates sending events to the queue
@@ -418,7 +429,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
         return {"success": True, "job_id": existing_jobs[0].get("job_id"), "events_url": f"/migrate/{existing_jobs[0].get('job_id')}/events", "message": "A migration job is already running for this PMDB account. Please wait for it to complete before starting a new one."}
     
     try:
-        event_queue = queue.Queue()  # Create a new event queue for this job
+        event_queue = create_event_queue()  # Create a bounded event queue for this job
         sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue, sync_options.trakt_data)  # Build the sync context with the provided options and event queue
 
         sync_options_data = sync_options.model_dump()

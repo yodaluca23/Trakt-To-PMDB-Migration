@@ -607,6 +607,26 @@
             }
         }
 
+        function appendMigrationLog(entry) {
+            const maxLogChars = 100000;
+            const existingLogs = localStorage.getItem("migration_logs") || "";
+            let updatedLogs = existingLogs + JSON.stringify(entry) + "\n";
+
+            if (updatedLogs.length > maxLogChars) {
+                updatedLogs = updatedLogs.slice(updatedLogs.length - maxLogChars);
+                const firstNewline = updatedLogs.indexOf("\n");
+                if (firstNewline > -1) {
+                    updatedLogs = updatedLogs.slice(firstNewline + 1);
+                }
+            }
+
+            localStorage.setItem("migration_logs", updatedLogs);
+
+            if (logsContainer.style.display === "block") {
+                logsContent.textContent = updatedLogs;
+            }
+        }
+
         // Track intentional page teardown so refresh/navigation does not trigger error cleanup.
         let isPageUnloading = false;
         window.addEventListener("beforeunload", () => {
@@ -634,15 +654,9 @@
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
-                // Append new logs to the existing logs in local storage
+                // Keep the stored log history bounded so the page does not retain unbounded SSE payloads.
                 if (data) {
-                    const existingLogs = localStorage.getItem("migration_logs") || "";
-                    const updatedLogs = existingLogs + JSON.stringify(data) + "\n";
-                    localStorage.setItem("migration_logs", updatedLogs);
-
-                    if (logsContainer.style.display === "block") {
-                        logsContent.textContent = updatedLogs; // Update logs display if it's currently visible
-                    }
+                    appendMigrationLog(data);
                 }
 
                 if (data.step !== undefined) {
@@ -689,7 +703,7 @@
                 }
                 eventSource.close();
                 console.error("Error with event source:", error);
-                localStorage.setItem("migration_logs", (localStorage.getItem("migration_logs") || "") + "Connection lost. Please refresh the page.\n"); // Log the connection loss in migration logs
+                appendMigrationLog({ message: "Connection lost. Please refresh the page." }); // Log the connection loss in migration logs
                 localStorage.removeItem("migration_progress"); // Reset progress in local storage
                 localStorage.removeItem("events_url"); // Clear the events URL from local storage
                 alert("Connection lost. Please refresh the page.");
