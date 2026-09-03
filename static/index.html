@@ -434,6 +434,7 @@
                 options[checkbox.id] = checkbox.checked;
                 return options;
             }, {});
+            let collectedData;
             try {
                 collectedData = await getTraktData();
             } catch (error) {
@@ -651,7 +652,7 @@
             mark_all_dots_before(progress_number); // Update the status dots based on the last known progress
             const eventSource = new EventSource(eventsUrl);
             let migrationEnded = false;
-            eventSource.onmessage = (event) => {
+            eventSource.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
 
                 // Keep the stored log history bounded so the page does not retain unbounded SSE payloads.
@@ -673,7 +674,12 @@
                     alert("Migration completed!");
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
-                    location.reload(); // Reload the page to reset the form and status indicators
+                    localStorage.removeItem("trakt_data_file");
+                    try {
+                        await clearTraktData();
+                    } finally {
+                        location.reload(); // Reload the page to release job data and reset the form
+                    }
                 }
                 if (data.type === "error" || data.status === "error") {
                     alert(`Migration had an error: ${data.message}`);

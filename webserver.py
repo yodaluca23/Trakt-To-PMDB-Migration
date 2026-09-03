@@ -17,6 +17,8 @@ from uuid import uuid4
 from cryptography.fernet import Fernet
 from contextlib import asynccontextmanager
 import asyncio
+import gc
+import ctypes
 
 # Define SIGTERM handler
 shutdown_requested = threading.Event()
@@ -52,6 +54,25 @@ def enqueue_event(event_queue: queue.Queue, event: dict) -> None:
     try:
         event_queue.put_nowait(event)
     except queue.Full:
+        # Terminal events must not be dropped or an SSE stream can remain alive forever.
+        if event.get("type") in {"complete", "critical"}:
+            try:
+                event_queue.get_nowait()
+                event_queue.put_nowait(event)
+            except (queue.Empty, queue.Full):
+                pass
+
+def release_job_memory(sync_context) -> None:
+    """Drop large job-owned objects and return free arenas to libc when supported."""
+    sync_context.trakt_data = None
+    sync_context.token_data = None
+    sync_context.trakt_headers = None
+    sync_context.pmdb_headers = None
+    sync_context.event_queue = None
+    gc.collect()
+    try:
+        ctypes.CDLL(None).malloc_trim(0)
+    except (AttributeError, OSError):
         pass
 
 def get_running_job(job_id: str) -> dict | None:
@@ -337,10 +358,12 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
     try:
         if sync_options.get("sync_watchlist_choice"):
             sync_watchlist(sync_context)
+        sync_context.trakt_data.pop("lists-watchlist", None)
         enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 17})
 
         if sync_options.get("sync_lists_choice"):
             sync_lists(sync_context)
+        sync_context.trakt_data.pop("lists-lists", None)
         enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 33})
 
         if sync_options.get("sync_show_watch_history_choice"):
@@ -349,6 +372,7 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
 
         if sync_options.get("sync_movie_watch_history_choice"):
             sync_movie_watch_history(sync_context)
+        sync_context.trakt_data.pop("watched-history", None)
         enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
 
         if sync_options.get("sync_show_resume_points_choice"):
@@ -357,15 +381,16 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
             
         if sync_options.get("sync_movie_resume_points_choice"):
             sync_resume_points(sync_context, "movies")
+        sync_context.trakt_data.pop("watched-playback", None)
 
         enqueue_event(event_queue, {"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
-
-        remove_job(job_id)  # Remove the job from the running jobs list after completion
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()
         enqueue_event(event_queue, {"type": "critical", "message": f"Migration failed: {str(e)}"})
-        remove_job(job_id)  # Remove the job from the running jobs list after completion
+    finally:
+        remove_job(job_id)
+        release_job_memory(sync_context)
 
 def create_sync_job(sync_context: dict, sync_options: dict, event_queue: queue.Queue) -> tuple[str, queue.Queue, threading.Thread]:
     job_id = f"job_{uuid4()}_{int(datetime.now().timestamp())}"  # Create a unique job ID based on the current timestamp and number of running jobs
@@ -432,7 +457,8 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
         event_queue = create_event_queue()  # Create a bounded event queue for this job
         sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue, sync_options.trakt_data)  # Build the sync context with the provided options and event queue
 
-        sync_options_data = sync_options.model_dump()
+        # Do not duplicate the potentially huge export into the worker's options.
+        sync_options_data = sync_options.model_dump(exclude={"trakt_data"})
         job_id, event_queue, thread = create_sync_job(sync_context, sync_options_data, event_queue)  # Create the sync job and get the event queue
         add_job(job_id, event_queue, pmdb_api_key)  # Add the new job to the list of running jobs
 
