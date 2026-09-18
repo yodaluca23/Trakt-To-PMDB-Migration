@@ -1,16 +1,15 @@
 import os
 import json
 from time import sleep
-import requests
 import queue
 import threading
 import traceback
 from datetime import datetime
-from main import check_pmdb_token, sync_lists, sync_resume_points, sync_movie_watch_history, sync_show_watch_history, sync_watchlist, add_user_information, create_trakt_headers, build_sync_context, trakt_api_url, version
+from main import check_pmdb_token, sync_lists, sync_resume_points, sync_movie_watch_history, sync_show_watch_history, sync_watchlist, build_sync_context, version
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi.responses import StreamingResponse
 import base64
 from pydantic import BaseModel
 from uuid import uuid4
@@ -40,15 +39,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 load_dotenv()
-session = requests.Session()
 running_jobs = []  # List to keep track of running jobs and their event queues
 jobs_lock = threading.Lock()  # Lock to synchronize access to the running_jobs list
 server_start_time = datetime.now()
 
-
 def create_event_queue() -> queue.Queue:
     return queue.Queue(maxsize=500)
-
 
 def enqueue_event(event_queue: queue.Queue, event: dict) -> None:
     try:
@@ -65,10 +61,9 @@ def enqueue_event(event_queue: queue.Queue, event: dict) -> None:
 def release_job_memory(sync_context) -> None:
     """Drop large job-owned objects and return free arenas to libc when supported."""
     sync_context.trakt_data = None
-    sync_context.token_data = None
-    sync_context.trakt_headers = None
     sync_context.pmdb_headers = None
     sync_context.event_queue = None
+    sync_context.trakt_profile = None
     gc.collect()
     try:
         ctypes.CDLL(None).malloc_trim(0)
@@ -138,7 +133,6 @@ class server_status(BaseModel):
     version: str
     server_time: str
     server_uptime_seconds: float
-    trakt_url: str
 
     model_config = {
         "json_schema_extra": {
@@ -148,7 +142,6 @@ class server_status(BaseModel):
                     "version": "1.0.0",
                     "server_time": "2026-04-13T13:19:44.808877",
                     "server_uptime_seconds": 272.221156,
-                    "trakt_url": "https://api.trakt.tv/oauth/authorize"
                 }
             ]
         }
@@ -176,54 +169,6 @@ def encode_cookie(data: dict) -> str | None:
         print(f"Error encoding cookie: {e}")
         return None
 
-def set_trakt_cookies(response: Response, data: dict) -> Response:
-
-    data = add_user_information(data, create_trakt_headers(data))
-
-    if data is None:
-        raise HTTPException(status_code=500, detail="Failed to retrieve user information from Trakt")
-
-    refresh_token_data = {
-        "refresh_token": data.get("refresh_token", ""),
-        "created_at": data.get("created_at", 0),
-        "expires_in": data.get("expires_in", 0)
-    }
-
-    cookies = encode_cookie(data)
-    refresh_token = encode_cookie(refresh_token_data)
-    response.set_cookie(key="trakt_auth", value=cookies, httponly=True, max_age=data.get("expires_in", 3600), samesite="strict", secure=False if os.getenv("domain", "http://127.0.0.1:8000").startswith("http://") else True)  # Set access token cookie with expiration time, secure flag if domain is set
-    response.set_cookie(key="trakt_auth_refresh", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="strict", secure=False if os.getenv("domain", "http://127.0.0.1:8000").startswith("http://") else True)  # Set refresh token cookie for 30 days
-
-    return response
-
-def refresh_trakt_token(response: Response, refresh_token: str) -> tuple[Response, bool, dict | None]:
-    global trakt_api_url
-
-    client_id = os.getenv("trakt_client")
-    client_secret = os.getenv("trakt_secret")
-
-    url = trakt_api_url + "/oauth/token"
-
-    payload = {
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "grant_type": "refresh_token"
-    }
-    headers = {"Content-Type": "application/json"}
-
-    res = session.request("POST", url, json=payload, headers=headers)
-
-    if res.status_code == 200:
-        data = res.json()
-        response = set_trakt_cookies(response, data)
-        return response, True, data
-    else:
-        response.delete_cookie(key="trakt_auth")
-        response.delete_cookie(key="trakt_auth_refresh")
-
-        return response, False, None
-
 @app.get("/status")
 def get_server_status() -> server_status:
     global trakt_api_url, userAgent
@@ -235,48 +180,9 @@ def get_server_status() -> server_status:
         "server_uptime_seconds": (datetime.now() - server_start_time).total_seconds()
     }
 
-    client_id = os.getenv("trakt_client")
-    redirect_uri = os.getenv("domain", "http://127.0.0.1:8000") + os.getenv("trakt_redirect_uri", "/trakt/callback")
-    
-    user_url = f"{trakt_api_url}/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}"
-    returnDict["trakt_url"] = user_url
     status_return = server_status(**returnDict)
 
     return status_return
-
-@app.post("/trakt/auth")
-def authenticate_trakt_user(response: Response, Authorization: str = Header(default=None)) -> dict:
-    global trakt_api_url, userAgent
-
-    client_id = os.getenv("trakt_client")
-    client_secret = os.getenv("trakt_secret")
-    if not Authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    code = Authorization.split(" ")[-1]  # Extract the code from the header
-    if not code:
-        raise HTTPException(status_code=401, detail="Missing authorization code")
-
-    url = trakt_api_url + "/oauth/token"
-
-    payload = {
-        "code": code,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": os.getenv("domain", "http://127.0.0.1:8000") + os.getenv("trakt_redirect_uri", "/trakt/callback"),
-        "grant_type": "authorization_code"
-    }
-    headers = {"Content-Type": "application/json"}
-
-    res = session.request("POST", url, json=payload, headers=headers)
-
-    if res.status_code == 200:
-        data = res.json()
-
-        response = set_trakt_cookies(response, data)
-        return {"success": True, "message": "Cookies set successfully"}
-    else:
-        raise HTTPException(status_code=res.status_code, detail={"error": "Failed to authenticate with Trakt", "details": res.text})
     
 @app.post("/pmdb/auth")
 def authenticate_pmdb_user(response: Response, Authorization: str = Header(default=None)) -> dict:
@@ -300,24 +206,11 @@ def authenticate_pmdb_user(response: Response, Authorization: str = Header(defau
     return {"success": True, "message": "PMDB authentication successful"}
 
 @app.get("/auth/status")
-def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie(default=None)) -> dict:
 
-    needTraktRefresh = False
-    if (not trakt_auth) and trakt_auth_refresh:
-        trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
-        needTraktRefresh = True  # Indicate that the token is not fully valid and needs to be refreshed on the server side
-
-
-    trakt_logged_in = trakt_auth is not None
     pmdb_logged_in = pmdb_auth is not None
 
     # Decode the auth cookies from base64
-    if trakt_auth:
-        trakt_auth = decode_cookie(trakt_auth)
-        if not trakt_auth:
-            print("Failed to decode trakt_auth cookie")
-            trakt_logged_in = False
-
     if pmdb_auth:
         pmdb_auth = decode_cookie(pmdb_auth)
         if not pmdb_auth:
@@ -326,21 +219,10 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         else:
             pmdb_auth = pmdb_auth.get("api_key", "")
 
-    if needTraktRefresh or (trakt_logged_in and ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp())):  # If token expires in less than 5 minutes
-        response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
-        if refreshed:
-            trakt_logged_in = True
-        else:
-            trakt_logged_in = False
-
     if pmdb_logged_in:
         pmdb_logged_in = check_pmdb_token(pmdb_auth)
 
-    trakt_user = None
     pmdb_user = None
-
-    if trakt_logged_in and trakt_auth:
-        trakt_user = trakt_auth.get("username", "")
 
     if pmdb_logged_in and pmdb_auth:
         pmdb_user = pmdb_auth[:15] + "..."  # Show only the first 15 characters of the PMDB API key for privacy
@@ -348,8 +230,6 @@ def get_authentication_status(response: Response, pmdb_auth: str | None = Cookie
         response.delete_cookie(key="pmdb_auth")
 
     return {
-        "trakt": trakt_logged_in,
-        "trakt_user": trakt_user,
         "pmdb": pmdb_logged_in,
         "pmdb_user": pmdb_user
     }
@@ -417,36 +297,22 @@ def create_sync_job_dummy() -> tuple[str, queue.Queue, threading.Thread]:
     return job_id, event_queue, thread
 
 @app.post("/migrate")
-def request_data_migration(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None), trakt_auth: str | None = Cookie(default=None), trakt_auth_refresh: str | None = Cookie(default=None)) -> dict:
+def request_data_migration(sync_options: sync_options, response: Response, pmdb_auth: str | None = Cookie(default=None)) -> dict:
     if shutdown_requested.is_set():
         raise HTTPException(status_code=503, detail="Server is shutting down; new migrations are disabled")
 
-    needTraktRefresh = False
-    if (not trakt_auth) and trakt_auth_refresh:
-        trakt_auth = trakt_auth_refresh  # Use refresh token if access token is missing
-        needTraktRefresh = True  # Indicate that the token is not fully valid and needs to be refreshed on the server side
-
-    if not trakt_auth:
-        raise HTTPException(status_code=401, detail="Not authenticated with Trakt")
     if not pmdb_auth:
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
 
-    # Decode the auth cookies
-    trakt_auth = decode_cookie(trakt_auth)
+    trakt_auth = sync_options.trakt_data.get("user-profile", None)
     if not trakt_auth:
-        print("Failed to decode trakt_auth cookie")
-        raise HTTPException(status_code=400, detail="Invalid Trakt authentication cookie")
+        raise HTTPException(status_code=401, detail="Not authenticated with Trakt or missing Trakt user profile data")
     
     pmdb_auth = decode_cookie(pmdb_auth)
     pmdb_api_key = pmdb_auth.get("api_key", "") if pmdb_auth else None
     if not pmdb_api_key:
         print("Failed to decode pmdb_auth cookie")
         raise HTTPException(status_code=400, detail="Invalid PMDB authentication cookie")
-    
-    if needTraktRefresh or ((trakt_auth.get("expires_in", 0) + trakt_auth.get("created_at", 0) + 300) < datetime.now().timestamp()):  # If token expires in less than 5 minutes
-        response, refreshed, trakt_auth = refresh_trakt_token(response, trakt_auth.get("refresh_token", ""))
-        if not refreshed:
-            raise HTTPException(status_code=401, detail="Trakt authentication expired and refresh failed")
 
     existing_jobs = search_running_jobs(pmdb_api_key)
     if existing_jobs:
@@ -455,7 +321,7 @@ def request_data_migration(sync_options: sync_options, response: Response, pmdb_
     
     try:
         event_queue = create_event_queue()  # Create a bounded event queue for this job
-        sync_context = build_sync_context(trakt_auth, pmdb_api_key, event_queue, sync_options.trakt_data)  # Build the sync context with the provided options and event queue
+        sync_context = build_sync_context(pmdb_api_key, event_queue, sync_options.trakt_data)  # Build the sync context with the provided options and event queue
 
         # Do not duplicate the potentially huge export into the worker's options.
         sync_options_data = sync_options.model_dump(exclude={"trakt_data"})
@@ -512,10 +378,6 @@ def migrate_job_events(job_id: str, request: Request, pmdb_auth: str | None = Co
         raise HTTPException(status_code=401, detail="Not authenticated with PMDB")
     
     return stream_sync_job(job_id, pmdb_api_key, request)
-
-@app.get(os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") if os.getenv("trakt_redirect_uri", "/trakt/callback_fallback") != "/trakt/callback" else "/trakt/callback_fallback")
-def trakt_callback_fallback(code: str | None = None) -> RedirectResponse:
-    return RedirectResponse(url=f"/trakt/callback?code={code}", status_code=301)
 
 # This mounts the "static" directory to serve static files (like the callback HTML page) at the root URL.
 # `html=True` makes `/` resolve to `static/index.html` automatically.

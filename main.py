@@ -13,7 +13,7 @@ load_dotenv()
 
 trakt_api_url = "https://api.trakt.tv"
 pmdb_api_url = "https://publicmetadb.com/api"
-version = "1.0.0"
+version = "1.1.0"
 userAgent = f"TraktMigration/{version}"
 
 session = requests.Session()
@@ -24,15 +24,14 @@ session.headers.update({
 
 @dataclass
 class SyncContext:
-    token_data: dict
-    trakt_headers: dict
     pmdb_headers: dict
     trakt_data: dict
+    trakt_profile: dict
     event_queue: queue.Queue | None = None
 
     @property
     def username(self) -> str:
-        return self.token_data.get("username", "")
+        return self.trakt_profile.get("username", "")
     
 def log(message: str, ctx: SyncContext = None, level: str = "info") -> None:
     event_queue = ctx.event_queue if ctx else None
@@ -66,13 +65,12 @@ def create_trakt_headers(token_data: dict = None) -> dict:
 
     return headers
 
-def build_sync_context(token_data: dict, pmdb_api_key: str, event_queue: queue.Queue = None, trakt_data: dict = None) -> SyncContext:
+def build_sync_context(pmdb_api_key: str, event_queue: queue.Queue = None, trakt_data: dict = None) -> SyncContext:
     return SyncContext(
-        token_data=token_data,
-        trakt_headers=create_trakt_headers(token_data),
         pmdb_headers={"Authorization": "Bearer " + pmdb_api_key},
         event_queue=event_queue,
-        trakt_data=trakt_data
+        trakt_data=trakt_data,
+        trakt_profile=trakt_data.get("user-profile") if trakt_data else None,
     )
 
 def add_user_information(token_data: dict, trakt_headers: dict) -> dict | None:
@@ -354,27 +352,27 @@ def sync_lists(ctx: SyncContext, sync_all: bool = True) -> bool:
     return all_success
 
 def submit_watched_timestamp_to_pmdb(ctx: SyncContext, tmdb_id: int, type: str, watched_at: str, season: int = None, episode: int = None) -> bool:
-        url = pmdb_api_url + "/external/watched"
+    url = pmdb_api_url + "/external/watched"
 
-        if watched_at == "1970-01-01T00:00:00.000Z":
-            watched_at = None # For when Trakt marks a movie with 'Unknown' watched date.
+    if watched_at == "1970-01-01T00:00:00.000Z":
+        watched_at = None # For when Trakt marks a movie with 'Unknown' watched date.
 
-        body = {
-            "media_type": type,
-            "tmdb_id": tmdb_id,
-            "watched_at": watched_at
-        }
+    body = {
+        "media_type": type,
+        "tmdb_id": tmdb_id,
+        "watched_at": watched_at
+    }
 
-        if season and episode:
-            body["season"] = season
-            body["episode"] = episode
+    if season and episode:
+        body["season"] = season
+        body["episode"] = episode
 
-        response = session.post(url, headers=ctx.pmdb_headers, json=body)
-        if response.status_code >= 200 and response.status_code < 300 and response.json().get("success"):
-            return True
-        else:
-            log(f"Failed to submit watch history for TMDB ID {tmdb_id} to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
-            return False
+    response = session.post(url, headers=ctx.pmdb_headers, json=body)
+    if response.status_code >= 200 and response.status_code < 300 and response.json().get("success"):
+        return True
+    else:
+        log(f"Failed to submit watch history for TMDB ID {tmdb_id} to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return False
     
 def submit_history_movie_to_pmdb(ctx: SyncContext, movie: dict) -> bool:
 
@@ -416,6 +414,10 @@ def sync_movie_watch_history(ctx: SyncContext) -> bool:
         log("Using watched movies from provided trakt_data.", ctx=ctx)
         watch_history = ctx.trakt_data.get("watched-history")
         success = submit_exported_history_to_pmdb(ctx, "movie", watch_history)
+        if success:
+            log("Movie watch history synced successfully!", ctx=ctx)
+        else:
+            log("Movie watch history failed to sync.", ctx=ctx)
         return success
     
     url = trakt_api_url + f"/users/{ctx.username}/watched/movies"
@@ -555,6 +557,10 @@ def sync_show_watch_history(ctx: SyncContext) -> bool:
         log("Using watched shows from provided trakt_data.", ctx=ctx)
         watch_history = ctx.trakt_data.get("watched-history")
         success = submit_exported_history_to_pmdb(ctx, "episode", watch_history)
+        if success:
+            log("Show watch history synced successfully!", ctx=ctx)
+        else:
+            log("Show watch history failed to sync.", level="error", ctx=ctx)
         return success
 
     url = trakt_api_url + f"/users/{ctx.username}/watched/shows"
