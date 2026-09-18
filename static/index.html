@@ -255,7 +255,7 @@
                                         }
 
                                         const jsonData = JSON.parse(entryText);
-                                        if (normalName === "user-profile" && !jsonData.username) {
+                                        if (normalName === "user-profile") {
                                             // Remove sensitive information from the user-profile data, so it never gets sent to the server.
                                             jsonData["joined_at"] = "";
                                             jsonData["location"] = "";
@@ -680,6 +680,7 @@
                     alert("Migration completed!");
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
+                    localStorage.removeItem("trakt_data_file");
                     try {
                         await clearTraktData();
                     } finally {
