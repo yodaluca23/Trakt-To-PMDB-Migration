@@ -5,7 +5,7 @@ import queue
 import threading
 import traceback
 from datetime import datetime
-from main import check_pmdb_token, sync_lists, sync_resume_points, sync_movie_watch_history, sync_show_watch_history, sync_watchlist, build_sync_context, version
+from main import check_pmdb_token, sync_lists, sync_resume_points, sync_movie_watch_history, sync_show_watch_history, sync_dropped_shows, sync_watchlist, build_sync_context, version
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Cookie, Response, status, Request
 from fastapi.staticfiles import StaticFiles
@@ -102,6 +102,7 @@ class sync_options(BaseModel):
     sync_movie_resume_points_choice: bool = False
     sync_movie_watch_history_choice: bool = False
     sync_show_resume_points_choice: bool = False
+    sync_dropped_shows_choice: bool = False
     sync_show_watch_history_choice: bool = False
     sync_watchlist_choice: bool = False
     trakt_data: dict
@@ -114,6 +115,7 @@ class sync_options(BaseModel):
                     "sync_movie_resume_points_choice": True,
                     "sync_movie_watch_history_choice": False,
                     "sync_show_resume_points_choice": True,
+                    "sync_dropped_shows_choice": False,
                     "sync_show_watch_history_choice": True,
                     "sync_watchlist_choice": False,
                     "trakt_data": {
@@ -121,7 +123,8 @@ class sync_options(BaseModel):
                         "lists-watchlist": [],
                         "lists-lists": [],
                         "watched-playback": [],
-                        "user-profile": []
+                        "user-profile": [],
+                        "hidden-calendar": []
                     }
                 }
             ]
@@ -239,31 +242,36 @@ def migrate_data(sync_context: dict, sync_options: dict, event_queue: queue.Queu
         if sync_options.get("sync_watchlist_choice"):
             sync_watchlist(sync_context)
         sync_context.trakt_data.pop("lists-watchlist", None)
-        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 17})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing watchlist", "step": 1, "progress": 14})
 
         if sync_options.get("sync_lists_choice"):
             sync_lists(sync_context)
         sync_context.trakt_data.pop("lists-lists", None)
-        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 33})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing lists", "step": 2, "progress": 29})
 
         if sync_options.get("sync_show_watch_history_choice"):
             sync_show_watch_history(sync_context)
-        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show watch history", "step": 3, "progress": 50})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show watch history", "step": 3, "progress": 43})
 
         if sync_options.get("sync_movie_watch_history_choice"):
             sync_movie_watch_history(sync_context)
         sync_context.trakt_data.pop("watched-history", None)
-        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 67})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing movie watch history", "step": 4, "progress": 57})
+
+        if sync_options.get("sync_dropped_shows_choice"):
+            sync_dropped_shows(sync_context)
+        sync_context.trakt_data.pop("hidden-calendar", None)
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing dropped shows", "step": 5, "progress": 71})
 
         if sync_options.get("sync_show_resume_points_choice"):
             sync_resume_points(sync_context, "episodes")
-        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show resume points", "step": 5, "progress": 83})
+        enqueue_event(event_queue, {"type": "progress", "message": "Finished syncing show resume points", "step": 6, "progress": 86})
             
         if sync_options.get("sync_movie_resume_points_choice"):
             sync_resume_points(sync_context, "movies")
         sync_context.trakt_data.pop("watched-playback", None)
 
-        enqueue_event(event_queue, {"type": "complete", "message": "Migration complete", "step": 6, "progress": 100})
+        enqueue_event(event_queue, {"type": "complete", "message": "Migration complete", "step": 7, "progress": 100})
     except Exception as e:
         print(f"Error during migration: {e}")
         traceback.print_exc()

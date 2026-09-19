@@ -52,6 +52,9 @@
         <input type="checkbox" id="sync_movie_watch_history_choice" name="sync_options" value="true" />
         <label for="sync_movie_watch_history_choice">
             Sync Movie Watch History</label><br />
+        <input type="checkbox" id="sync_dropped_shows_choice" name="sync_options" value="true" />
+        <label for="sync_dropped_shows_choice">
+            Sync Dropped Shows [WIP]</label><br />
         <input type="checkbox" id="sync_show_resume_points_choice" name="sync_options" value="true" />
         <label for="sync_show_resume_points_choice">
             Sync Show Progress/Resume Points</label><br />
@@ -77,6 +80,10 @@
         <p class="sf-indicator">
             <span class="movie-history-status status-dot status-red"></span>
             <span class="status-text">Movie Watch History Migration</span>
+        </p>
+        <p class="sf-indicator">
+            <span class="dropped-shows-status status-dot status-red"></span>
+            <span class="status-text">Dropped Shows Migration</span>
         </p>
         <p class="sf-indicator">
             <span class="show-resume-status status-dot status-red"></span>
@@ -107,7 +114,14 @@
     </div>
 
     <p class="support">
-        Feel free to submit any issues you encounter on <a href="https://github.com/yodaluca23/Trakt-To-PMDB-Migration/issues" target="_blank">the GitHub repository</a>. If you found this tool useful and would like to support its development and maintenance, and you use TorBox feel free to use my <a href="https://torbox.app/subscription?referral=282666da-3d63-4312-a6e7-3c16f5a283d7" target="_blank">referral code</a> when signing up for a new account or renewing your subscription. You can also support the project by sharing it with others who might find it useful, contributing to the codebase, or providing feedback and suggestions for improvement.
+        Feel free to submit any issues you encounter on <a
+            href="https://github.com/yodaluca23/Trakt-To-PMDB-Migration/issues" target="_blank">the GitHub
+            repository</a>. If you found this tool useful and would like to support its development and maintenance, and
+        you use TorBox feel free to use my <a
+            href="https://torbox.app/subscription?referral=282666da-3d63-4312-a6e7-3c16f5a283d7"
+            target="_blank">referral code</a> when signing up for a new account or renewing your subscription. You can
+        also support the project by sharing it with others who might find it useful, contributing to the codebase, or
+        providing feedback and suggestions for improvement.
     </p>
 
     <p class="disclaimer">
@@ -185,6 +199,7 @@
             "lists-lists",
             "watched-playback",
             "user-profile",
+            "hidden-calendar"
         ]; // List of expected files in the Trakt export ZIP
 
         function failTraktFileImport(message, error) {
@@ -380,6 +395,7 @@
                 "lists",
                 "show-history",
                 "movie-history",
+                "dropped-shows",
                 "show-resume",
                 "movie-resume",
             ];
@@ -461,13 +477,14 @@
                 return;
             }
             syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server
+            syncJson = JSON.stringify(syncOptions);
 
             fetch("/migrate", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify(syncOptions),
+                body: syncJson,
             })
                 .then((response) => response.json())
                 .then((data) => {

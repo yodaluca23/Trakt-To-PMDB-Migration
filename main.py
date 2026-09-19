@@ -167,9 +167,9 @@ def fetch_watchlist(ctx: SyncContext) -> list | None:
 
     url = trakt_api_url + f"/users/{ctx.username}/watchlist/all/added/asc"
 
-    response = session.get(url, headers=ctx.trakt_headers)
+    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_data else None
 
-    if response.status_code == 200:
+    if response and response.status_code == 200:
         watchlist = response.json()
         log(f"Watchlist fetched successfully. Total items: {len(watchlist)}", ctx=ctx)
         return watchlist
@@ -269,9 +269,9 @@ def fetch_trakt_lists(ctx: SyncContext) -> list | None:
 
     url = trakt_api_url + f"/users/{ctx.username}/lists"
 
-    response = session.get(url, headers=ctx.trakt_headers)
+    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
 
-    if response.status_code == 200:
+    if response and response.status_code == 200:
         lists = response.json()
         log(f"Trakt lists fetched successfully. Total lists: {len(lists)}", ctx=ctx)
         return lists
@@ -282,8 +282,8 @@ def fetch_trakt_lists(ctx: SyncContext) -> list | None:
 def fetch_trakt_list(ctx: SyncContext, trakt_list: dict) -> list | None:
     url = trakt_api_url + f"/users/{ctx.username}/lists/{trakt_list.get('ids').get('trakt')}/items/all/added/asc"
 
-    response = session.get(url, headers=ctx.trakt_headers)
-    if response.status_code == 200:
+    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
+    if response and response.status_code == 200:
         return response.json()
     else:
         log(f"Failed to fetch Trakt list: {response.status_code} - {response.text}", level="error", ctx=ctx)
@@ -681,7 +681,7 @@ def sync_resume_points(ctx: SyncContext, sync_type: str) -> bool:
         progress_data = [item for item in sorted_resume_points if item.get("type") == sync_type_singular]
 
     url = trakt_api_url + f"/sync/playback/{sync_type}"
-    response = session.get(url, headers=ctx.trakt_headers) if not progress_data else None
+    response = session.get(url, headers=ctx.trakt_headers) if ((not progress_data) and ctx.trakt_headers) else None
 
     if response is None or response.status_code == 200:
         progress_data = response.json() if progress_data == [] else progress_data
@@ -716,4 +716,56 @@ def sync_resume_points(ctx: SyncContext, sync_type: str) -> bool:
         return all_success
     else:
         log(f"Failed to fetch {sync_type} resume points: {response.status_code} - {response.text}", level="error", ctx=ctx)
+        return False
+
+def submit_dropped_shows_to_pmdb(ctx: SyncContext, dropped_shows: list) -> bool:
+    all_success = True
+
+    for show in dropped_shows:
+        tmdb_id = show.get("show", {}).get("ids", {}).get("tmdb")
+
+        if not tmdb_id:
+            body = {
+                "id_type": "trakt",
+                "id_value": show.get("show", {}).get("ids", {}).get("trakt"),
+                "media_type": "tv"
+            }
+
+            id_response = session.get(pmdb_api_url + "/external/mappings/lookup", headers=ctx.pmdb_headers, json=body)
+            if id_response.status_code == 200:
+                tmdb_id = id_response.json().get("results", [{}])[0].get("tmdb_id")
+
+        url = pmdb_api_url + "/external/dropped"
+        body = {
+            "media_type": "tv",
+            "tmdb_id": tmdb_id
+        }
+
+        response = session.post(url, headers=ctx.pmdb_headers, json=body)
+        if response.status_code >= 200 and response.status_code < 300 and response.json().get("success"):
+            log(f"Submitted dropped show '{show.get('show', {}).get('title')}' to PMDB.", level="verbose", ctx=ctx)
+        else:
+            all_success = False
+            log(f"Failed to submit dropped show '{show.get('show', {}).get('title')}' to PMDB: {response.status_code} - {response.text}", level="error", ctx=ctx)
+
+    return all_success
+
+def sync_dropped_shows(ctx):
+    log("Syncing dropped shows...", ctx=ctx)
+
+    dropped_shows = []
+    if ctx.trakt_data and ctx.trakt_data.get("hidden-calendar") is not None:
+        log(f"Using dropped shows from provided trakt_data.", ctx=ctx)
+        dropped_shows = ctx.trakt_data.get("hidden-calendar")
+
+    if dropped_shows:
+        success = submit_dropped_shows_to_pmdb(ctx, dropped_shows)
+        if success:
+            log("Dropped shows synced successfully!", ctx=ctx)
+        else:
+            log("Dropped shows failed to sync.", level="error", ctx=ctx)
+        
+        return success
+    else:
+        log("No dropped shows found in the provided trakt_data. Skipping sync.", level="info", ctx=ctx)
         return False
