@@ -217,4 +217,4 @@ __marimo__/
 # Project-specific ignores
 token.json
 tempCodeRunnerFile.py
-migration_data.json
+migration_data*.json

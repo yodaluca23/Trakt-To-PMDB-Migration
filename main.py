@@ -13,7 +13,7 @@ load_dotenv()
 
 trakt_api_url = "https://api.trakt.tv"
 pmdb_api_url = "https://publicmetadb.com/api"
-version = "1.1.0"
+version = "1.1.1"
 userAgent = f"TraktMigration/{version}"
 
 session = requests.Session()

@@ -45,7 +45,9 @@
         <input type="checkbox" id="sync_watchlist_choice" name="sync_options" value="true" />
         <label for="sync_watchlist_choice"> Sync Watchlist</label><br />
         <input type="checkbox" id="sync_lists_choice" name="sync_options" value="true" />
-        <label for="sync_lists_choice"> Sync All Lists</label><br />
+        <label for="sync_lists_choice"> Sync Lists</label>
+        <button type="button" id="choose-lists" title="Expand Lists">▲</button><br />
+        <div class="lists-container"></div>
         <input type="checkbox" id="sync_show_watch_history_choice" name="sync_options" value="true" />
         <label for="sync_show_watch_history_choice">
             Sync Show Watch History</label><br />
@@ -135,13 +137,13 @@
         const TRAKT_STORE_NAME = "client-state";
         const TRAKT_DATA_KEY = "trakt_data";
 
-        function openTraktDb() {
+        function openDatabase(name, version, storeName) {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(TRAKT_DB_NAME, TRAKT_DB_VERSION);
+                const request = indexedDB.open(name, version);
                 request.onupgradeneeded = () => {
                     const db = request.result;
-                    if (!db.objectStoreNames.contains(TRAKT_STORE_NAME)) {
-                        db.createObjectStore(TRAKT_STORE_NAME);
+                    if (!db.objectStoreNames.contains(storeName)) {
+                        db.createObjectStore(storeName);
                     }
                 };
                 request.onsuccess = () => resolve(request.result);
@@ -149,12 +151,12 @@
             });
         }
 
-        async function setTraktData(data) {
-            const db = await openTraktDb();
+        async function setDatabase(data, name, version, storeName, key) {
+            const db = await openDatabase(name, version, storeName);
             return new Promise((resolve, reject) => {
-                const transaction = db.transaction(TRAKT_STORE_NAME, "readwrite");
-                const store = transaction.objectStore(TRAKT_STORE_NAME);
-                const request = store.put(data, TRAKT_DATA_KEY);
+                const transaction = db.transaction(storeName, "readwrite");
+                const store = transaction.objectStore(storeName);
+                const request = store.put(data, key);
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
                 transaction.oncomplete = () => db.close();
@@ -163,12 +165,12 @@
             });
         }
 
-        async function getTraktData() {
-            const db = await openTraktDb();
+        async function getDatabase(name, version, storeName, key) {
+            const db = await openDatabase(name, version, storeName);
             return new Promise((resolve, reject) => {
-                const transaction = db.transaction(TRAKT_STORE_NAME, "readonly");
-                const store = transaction.objectStore(TRAKT_STORE_NAME);
-                const request = store.get(TRAKT_DATA_KEY);
+                const transaction = db.transaction(storeName, "readonly");
+                const store = transaction.objectStore(storeName);
+                const request = store.get(key);
                 request.onsuccess = () => resolve(request.result || null);
                 request.onerror = () => reject(request.error);
                 transaction.oncomplete = () => db.close();
@@ -177,18 +179,102 @@
             });
         }
 
-        async function clearTraktData() {
-            const db = await openTraktDb();
+        async function clearDatabase(name, version, storeName, key) {
+            const db = await openDatabase(name, version, storeName);
             return new Promise((resolve, reject) => {
-                const transaction = db.transaction(TRAKT_STORE_NAME, "readwrite");
-                const store = transaction.objectStore(TRAKT_STORE_NAME);
-                const request = store.delete(TRAKT_DATA_KEY);
+                const transaction = db.transaction(storeName, "readwrite");
+                const store = transaction.objectStore(storeName);
+                const request = store.delete(key);
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
                 transaction.oncomplete = () => db.close();
                 transaction.onerror = () => db.close();
                 transaction.onabort = () => db.close();
             });
+        }
+
+        async function traktDataHandler() {
+            let collectedData;
+            try {
+                collectedData = await getDatabase(TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY);
+            } catch (error) {
+                console.error("Error parsing collected Trakt data:", error);
+                localStorage.removeItem("trakt_data"); // Clear the invalid data from local storage
+                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
+                clearDatabase(TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY).catch((cleanupError) => {
+                    console.error("Failed to clear stored Trakt data:", cleanupError);
+                });
+                alert("Failed to parse the collected Trakt data. Please re-upload your Trakt data file and try again.");
+                location.reload(); // Reload the page to reset the form and status indicators
+                return;
+            }
+            if (!collectedData) {
+                alert("No Trakt data is available. Please upload your Trakt data file again.");
+                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
+                location.reload(); // Reload the page to reset the form and status indicators
+                return;
+            }
+
+            return collectedData; // Return the collected data for further processing
+        }
+
+        async function displayTraktLists(listsContainer) {
+            let collectedData = await traktDataHandler();
+            if (!collectedData) {
+                return false; // Stop the function if no valid Trakt data is available
+            }
+            
+            const sync_lists_choice = document.getElementById("sync_lists_choice");
+
+            const lists = collectedData['lists-lists'] || [];
+            for(const list of lists) {
+                const listId = list['ids']['trakt'];
+                const listName = list['name'];
+                const listPrivacy = list['privacy'] == "private" ? "Private" : "Public"; // Convert privacy to title case for display
+                const listItemCount = list['item_count'];
+                const listCheckbox = document.createElement("input");
+                const listForm = document.createElement("form");
+                listForm.appendChild(listCheckbox);
+                listsContainer.appendChild(listForm);
+                listCheckbox.type = "checkbox";
+                listCheckbox.id = `list-${listId}`;
+                listCheckbox.name = "list_sync_options";
+                listCheckbox.checked = sync_lists_choice.checked;
+                listCheckbox.value = "true";
+                const listLabel = document.createElement("label");
+                listLabel.htmlFor = `list-${listId}`;
+                listLabel.textContent = `"${listName}" (${listPrivacy}, ${listItemCount} Items)`;
+                listForm.appendChild(listCheckbox);
+                listForm.appendChild(listLabel);
+                listForm.appendChild(document.createElement("br"));
+            }
+        }
+
+        function filterLists(syncOptionsJson) {
+            const listForm = document.querySelectorAll("input[name='list_sync_options']");
+
+            if (!syncOptionsJson.sync_lists_choice) {
+                syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if the master checkbox is not checked
+            }
+
+            if (!listForm || listForm.length === 0) {
+                return syncOptionsJson; // No lists to filter, return the original JSON
+            }
+
+            const selectedLists = Array.from(listForm)
+                .filter(checkbox => checkbox.checked)
+                .map(checkbox => checkbox.id.replace("list-", "")); // Extract the list IDs from the checkbox IDs
+
+            console.log("Selected list IDs for filtering:", selectedLists);
+
+            if (selectedLists.length === 0) {
+                syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if no checkboxes are selected
+                return syncOptionsJson;
+            }
+
+            // Filter the lists based on the selected list IDs
+            syncOptionsJson.trakt_data['lists-lists'] = syncOptionsJson.trakt_data['lists-lists'].filter(traktList => selectedLists.includes(traktList['ids']['trakt'] + ""));
+            return syncOptionsJson;
         }
 
         // Add click behavior to the Trakt file status text to trigger file input when clicked
@@ -202,6 +288,37 @@
             "hidden-calendar"
         ]; // List of expected files in the Trakt export ZIP
 
+        // Add click behavior to the Lists button to toggle the visibility of the lists container
+        const chooseListsButton = document.getElementById("choose-lists");
+        const listsContainer = document.querySelector(".lists-container");
+        const syncListsChoice = document.getElementById("sync_lists_choice");
+
+        function syncChildListCheckboxesWithMaster() {
+            const listCheckboxes = document.querySelectorAll("input[name='list_sync_options']");
+            listCheckboxes.forEach((checkbox) => {
+                checkbox.checked = syncListsChoice.checked;
+            });
+        }
+
+        if (syncListsChoice) {
+            syncListsChoice.addEventListener("change", syncChildListCheckboxesWithMaster);
+        }
+
+        chooseListsButton.addEventListener("click", () => {
+            if (listsContainer.style.display === "none" || listsContainer.style.display === "") {
+                listsContainer.style.display = "block";
+                chooseListsButton.textContent = "▼"; // Change button text to indicate collapse
+                chooseListsButton.title = "Collapse Lists";
+                if (listsContainer.childElementCount === 0) {
+                    displayTraktLists(listsContainer); // Call the function to display the lists
+                }
+            } else {
+                listsContainer.style.display = "none";
+                chooseListsButton.textContent = "▲"; // Change button text to indicate expand
+                chooseListsButton.title = "Expand Lists";
+            }
+        });
+
         function failTraktFileImport(message, error) {
             alert(message);
             traktFileStatus.classList.remove("status-orange");
@@ -210,7 +327,7 @@
             traktFileStatusText.textContent = `Trakt Data File (Invalid File)`;
             localStorage.removeItem("trakt_data_file");
             localStorage.removeItem("trakt_data");
-            clearTraktData().catch((cleanupError) => {
+            clearDatabase(TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY).catch((cleanupError) => {
                 console.error("Failed to clear stored Trakt data:", cleanupError);
             });
             console.error(message, error);
@@ -279,6 +396,13 @@
                                             jsonData["age"] = null;
                                             jsonData["images"] = {};
                                         }
+                                        if (normalName === "lists-lists") {
+                                            // Remove sensitive information from the list data, so it never gets sent to the server.
+                                            jsonData.forEach((traktList) => {
+                                                traktList["images"] = {};
+                                                traktList["user"] = {};
+                                            });
+                                        }
 
                                         if (collectedData[normalName]) {
                                             // Extend existing data if the file has already been processed (e.g., multiple history files)
@@ -323,7 +447,7 @@
 
                                 collectedData['file_name'] = file.name; // Store the original file name in the collected data for reference
 
-                                await setTraktData(collectedData); // Store the collected data for the migration process to use
+                                await setDatabase(collectedData, TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY); // Store the collected data for the migration process to use
                                 console.log("Collected Trakt data stored in IndexedDB:", collectedData);
                                 location.reload(); // Reload only after successful processing so form visibility updates correctly
                             } else {
@@ -456,28 +580,13 @@
                 options[checkbox.id] = checkbox.checked;
                 return options;
             }, {});
-            let collectedData;
-            try {
-                collectedData = await getTraktData();
-            } catch (error) {
-                console.error("Error parsing collected Trakt data:", error);
-                localStorage.removeItem("trakt_data"); // Clear the invalid data from local storage
-                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
-                clearTraktData().catch((cleanupError) => {
-                    console.error("Failed to clear stored Trakt data:", cleanupError);
-                });
-                alert("Failed to parse the collected Trakt data. Please re-upload your Trakt data file and try again.");
-                location.reload(); // Reload the page to reset the form and status indicators
-                return;
-            }
+            let collectedData = await traktDataHandler();
             if (!collectedData) {
-                alert("No Trakt data is available. Please upload your Trakt data file again.");
-                localStorage.removeItem("trakt_data_file"); // Clear the associated file name as well
-                location.reload(); // Reload the page to reset the form and status indicators
-                return;
+                return; // Stop the sync process if no valid Trakt data is available
             }
+
             syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server
-            syncJson = JSON.stringify(syncOptions);
+            const syncJson = JSON.stringify(filterLists(syncOptions)); // Filter the lists based on the selected checkboxes before sending to the server
 
             fetch("/migrate", {
                 method: "POST",
@@ -519,7 +628,6 @@
                 const pmdbStatusText = document.querySelector(
                     ".pmdb-status + .status-text",
                 );
-                const traktStatusDot = document.querySelector(".trakt-status");
                 const traktStatusText = document.querySelector(
                     ".trakt-status + .status-text",
                 );
@@ -532,18 +640,6 @@
                     pmdbStatusDot.classList.remove("status-green");
                     pmdbStatusDot.classList.add("status-red");
                     pmdbStatusText.innerText = "PublicMetaDb (Not Logged In)";
-
-                    mark_form_as_hidden();
-                }
-
-                if (data.trakt) {
-                    traktStatusDot.classList.remove("status-red");
-                    traktStatusDot.classList.add("status-green");
-                    traktStatusText.innerText = `Trakt (${data.trakt_user})`;
-                } else {
-                    traktStatusDot.classList.remove("status-green");
-                    traktStatusDot.classList.add("status-red");
-                    traktStatusText.innerText = "Trakt (Not Logged In)";
 
                     mark_form_as_hidden();
                 }
@@ -575,7 +671,7 @@
                 }
                 if (data.server_uptime_seconds !== undefined) {
                     console.log(`Server uptime (seconds): ${data.server_uptime_seconds}`);
-                    if (data.server_uptime_seconds < 300) {
+                    if (data.server_uptime_seconds < 3600) { // If the server has been up for less than an hour, alert the user about potential migration processing.
                         alert(`The server was started ${Math.round(data.server_uptime_seconds / 60)} minutes ago. If you recently requested a migration please do not request another. The current migration is likely still processing. Progress updates may be delayed until the current migration is complete. You can always check "publicmetadb.com/my-progress" for live updates on your migration progress.`);
                     }
                 }
@@ -699,7 +795,7 @@
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
                     localStorage.removeItem("trakt_data_file");
                     try {
-                        await clearTraktData();
+                        await clearDatabase(TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY);
                     } finally {
                         location.reload(); // Reload the page to release job data and reset the form
                     }
@@ -713,7 +809,7 @@
                     alert(`Critical Error - Migration aborted: ${data.message}`);
                     localStorage.removeItem("events_url"); // Clear the events URL from local storage
                     localStorage.removeItem("migration_progress"); // Reset progress in local storage
-                    clearTraktData().catch((cleanupError) => {
+                    clearDatabase(TRAKT_DB_NAME, TRAKT_DB_VERSION, TRAKT_STORE_NAME, TRAKT_DATA_KEY).catch((cleanupError) => {
                         console.error("Failed to clear stored Trakt data:", cleanupError);
                     });
                     location.reload(); // Reload the page to reset the form and status indicators

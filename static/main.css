@@ -131,3 +131,9 @@
 @keyframes l16{ 
     50%,100% {background-position: 100% 100%,50% 0,0 100%} 
 }
+
+/* Offset the lists div */
+.lists-container {
+  position: relative;
+  left: 20px;
+}
