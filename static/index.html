@@ -248,6 +248,7 @@
                 listForm.appendChild(listLabel);
                 listForm.appendChild(document.createElement("br"));
             }
+            syncChildListCheckboxesWithParent()
         }
 
         function filterSyncOptions(syncOptionsJson) {
@@ -258,7 +259,7 @@
                 syncOptionsJson.trakt_data['hidden-calendar'] = []; // Clear the dropped shows if the checkbox is not checked
             }
             if (!syncOptionsJson.sync_lists_choice) {
-                syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if the master checkbox is not checked
+                syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if the parent checkbox is not checked
             }
             if (!syncOptionsJson.sync_movie_resume_points_choice) {
                 syncOptionsJson.trakt_data['watched-playback'] = syncOptionsJson.trakt_data['watched-playback'].filter(item => item.type !== "movie"); // Clear movie resume points if the checkbox is not checked
@@ -310,15 +311,20 @@
         const listsContainer = document.querySelector(".lists-container");
         const syncListsChoice = document.getElementById("sync_lists_choice");
 
-        function syncChildListCheckboxesWithMaster() {
+        function syncChildListCheckboxesWithParent() {
             const listCheckboxes = document.querySelectorAll("input[name='list_sync_options']");
             listCheckboxes.forEach((checkbox) => {
                 checkbox.checked = syncListsChoice.checked;
+                if (syncListsChoice.checked) {
+                    checkbox.disabled = false; // Enable child checkboxes when parent is checked
+                } else {
+                    checkbox.disabled = true; // Disable child checkboxes when parent is unchecked
+                }
             });
         }
 
         if (syncListsChoice) {
-            syncListsChoice.addEventListener("change", syncChildListCheckboxesWithMaster);
+            syncListsChoice.addEventListener("change", syncChildListCheckboxesWithParent);
         }
 
         chooseListsButton.addEventListener("click", () => {
