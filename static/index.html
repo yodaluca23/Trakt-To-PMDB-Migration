@@ -250,11 +250,30 @@
             }
         }
 
-        function filterLists(syncOptionsJson) {
+        function filterSyncOptions(syncOptionsJson) {
             const listForm = document.querySelectorAll("input[name='list_sync_options']");
 
+            // Clear the relevant data in syncOptionsJson based on the state of the checkboxes to save bandwidth and avoid sending unnecessary data to the server.
+            if (!syncOptionsJson.sync_dropped_shows_choice) {
+                syncOptionsJson.trakt_data['hidden-calendar'] = []; // Clear the dropped shows if the checkbox is not checked
+            }
             if (!syncOptionsJson.sync_lists_choice) {
                 syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if the master checkbox is not checked
+            }
+            if (!syncOptionsJson.sync_movie_resume_points_choice) {
+                syncOptionsJson.trakt_data['watched-playback'] = syncOptionsJson.trakt_data['watched-playback'].filter(item => item.type !== "movie"); // Clear movie resume points if the checkbox is not checked
+            }
+            if (!syncOptionsJson.sync_movie_watch_history_choice) {
+                syncOptionsJson.trakt_data['watched-history'] = syncOptionsJson.trakt_data['watched-history'].filter(item => item.type !== "movie"); // Clear movie watch history if the checkbox is not checked
+            }
+            if (!syncOptionsJson.sync_show_resume_points_choice) {
+                syncOptionsJson.trakt_data['watched-playback'] = syncOptionsJson.trakt_data['watched-playback'].filter(item => item.type !== "episode"); // Clear episode resume points if the checkbox is not checked
+            }
+            if (!syncOptionsJson.sync_show_watch_history_choice) {
+                syncOptionsJson.trakt_data['watched-history'] = syncOptionsJson.trakt_data['watched-history'].filter(item => item.type !== "episode"); // Clear episode watch history if the checkbox is not checked
+            }
+            if (!syncOptionsJson.sync_watchlist_choice) {
+                syncOptionsJson.trakt_data['lists-watchlist'] = []; // Clear the watchlist if the checkbox is not checked
             }
 
             if (!listForm || listForm.length === 0) {
@@ -264,8 +283,6 @@
             const selectedLists = Array.from(listForm)
                 .filter(checkbox => checkbox.checked)
                 .map(checkbox => checkbox.id.replace("list-", "")); // Extract the list IDs from the checkbox IDs
-
-            console.log("Selected list IDs for filtering:", selectedLists);
 
             if (selectedLists.length === 0) {
                 syncOptionsJson.trakt_data['lists-lists'] = []; // Clear the lists if no checkboxes are selected
@@ -586,7 +603,7 @@
             }
 
             syncOptions["trakt_data"] = collectedData; // Include the collected Trakt data from local storage in the sync options sent to the server
-            const syncJson = JSON.stringify(filterLists(syncOptions)); // Filter the lists based on the selected checkboxes before sending to the server
+            const syncJson = JSON.stringify(filterSyncOptions(syncOptions)); // Filter the lists based on the selected checkboxes before sending to the server
 
             fetch("/migrate", {
                 method: "POST",
