@@ -167,7 +167,13 @@ def fetch_watchlist(ctx: SyncContext) -> list | None:
 
     url = trakt_api_url + f"/users/{ctx.username}/watchlist/all/added/asc"
 
-    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_data else None
+    response = None
+    if ctx.trakt_headers:
+        log("Fetching watchlist from Trakt API...", ctx=ctx)
+        response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_data else None
+    else:
+        log("No Trakt headers available. Skipping fetch of watchlist.", level="warning", ctx=ctx)
+        return []
 
     if response and response.status_code == 200:
         watchlist = response.json()
@@ -269,7 +275,13 @@ def fetch_trakt_lists(ctx: SyncContext) -> list | None:
 
     url = trakt_api_url + f"/users/{ctx.username}/lists"
 
-    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
+    response = None
+    if ctx.trakt_headers:
+        log("Fetching Trakt lists from Trakt API...", ctx=ctx)
+        response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
+    else:
+        log("No Trakt headers available. Skipping fetch of Trakt lists.", level="warning", ctx=ctx)
+        return []
 
     if response and response.status_code == 200:
         lists = response.json()
@@ -282,7 +294,14 @@ def fetch_trakt_lists(ctx: SyncContext) -> list | None:
 def fetch_trakt_list(ctx: SyncContext, trakt_list: dict) -> list | None:
     url = trakt_api_url + f"/users/{ctx.username}/lists/{trakt_list.get('ids').get('trakt')}/items/all/added/asc"
 
-    response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
+    response = None
+    if ctx.trakt_headers:
+        log(f"Fetching items for Trakt list '{trakt_list.get('name')}' from Trakt API...", ctx=ctx)
+        response = session.get(url, headers=ctx.trakt_headers) if ctx.trakt_headers else None
+    else:
+        log(f"No Trakt headers available. Skipping fetch of items for Trakt list '{trakt_list.get('name')}'.", level="warning", ctx=ctx)
+        return []
+
     if response and response.status_code == 200:
         return response.json()
     else:
@@ -681,7 +700,13 @@ def sync_resume_points(ctx: SyncContext, sync_type: str) -> bool:
         progress_data = [item for item in sorted_resume_points if item.get("type") == sync_type_singular]
 
     url = trakt_api_url + f"/sync/playback/{sync_type}"
-    response = session.get(url, headers=ctx.trakt_headers) if ((not progress_data) and ctx.trakt_headers) else None
+    response = None
+    if ctx.trakt_headers:
+        log(f"Fetching {sync_type} resume points from Trakt API...", ctx=ctx)
+        response = session.get(url, headers=ctx.trakt_headers) if ((not progress_data) and ctx.trakt_headers) else None
+    else:
+        log(f"No Trakt headers available. Skipping fetch of {sync_type} resume points from Trakt API.", level="warning", ctx=ctx)
+        return False
 
     if response is None or response.status_code == 200:
         progress_data = response.json() if progress_data == [] else progress_data
